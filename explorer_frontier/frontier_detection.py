@@ -2,7 +2,7 @@
 import rclpy
 from rclpy.node import Node
 from nav_msgs.msg import OccupancyGrid 
-from geometry_msgs.msg import PoseArray, PoseWithCovarianceStamped
+from geometry_msgs.msg import PoseArray, PoseWithCovarianceStamped, Pose
 import numpy as np
 
 class FastFrontPropagation(Node):
@@ -20,21 +20,21 @@ class FastFrontPropagation(Node):
             self.pose_callback,
             10,
         )
-        self.goles_sub = self.create_publisher(
+        self.goles_pub = self.create_publisher(
             PoseArray,
             '/frontier_region_list',
             10
         )
-        self.costmap_sub = self.create_publisher(
+        self.costmap_sub = self.create_subscription(
             OccupancyGrid,
             'global_costmap/obstacle_layer',
             self.costmap_callback,
             10
-        )
+            )
         self.pose = None
         self.slam_map = None
         self.lattice_vector = None 
-        self.scan_list = []
+        self.scan_list = set()
         self.front_queue = []
         self.F = []
         self.slam_width = None
@@ -72,6 +72,15 @@ class FastFrontPropagation(Node):
         mx = int((world_x - self.map_info.origin.position.x) / self.slam_resolution)
         my = int((world_y - self.map_info.origin.position.y) / self.slam_resolution)
         return mx, my
+    def map_to_world(self, q):
+        my, mx = self.rowcol(q)
+        origin_x = self.map_info.origin.position.x
+        origin_y = self.map_info.origin.position.y
+
+        wx = mx * self.slam_resolution + origin_x
+        wy = my * self.slam_resolution + origin_y
+
+        return wx, wy
 
     def get_seed_idx(self):
         if self.pose is None:
@@ -116,14 +125,14 @@ class FastFrontPropagation(Node):
 
     # ======================== ALGORITHMS ========================
     def extract_frontier_region(self):
-        self.scan_list = [] 
+        self.scan_list = set() 
         self.front_queue = []
         self.F = []
-        self.march_front()
-        self.extract_frontiers()
         self.lattice_vector = np.full(self.slam_width*self.slam_height,-1, dtype=int)
         # in this case, -1 represents far, 0 represents trial and 
         # 1 represents known
+        self.march_front()
+        self.extract_frontiers()
     def march_front(self):
         self.front_queue.append(self.get_seed_idx())
         while self.front_queue:
@@ -137,14 +146,26 @@ class FastFrontPropagation(Node):
                             self.front_queue.append(idx)
                             self.lattice_vector[idx] = 0
                     else:
-                        self.scan_list.append(q)
+                        self.scan_list.add(q)
 
     def extract_frontiers(self):
         for p in self.scan_list:
             neighbors = self.get_neighbors(p)
-            if all(self.slam_map[idx] != 1 for idx in neighbors):
-                self.F.append(p)
-        return self.F 
+            if all(self.slam_map[idx] != 100 for idx in neighbors):
+                front = Pose()
+                front.position.x, front.position.y = self.map_to_world(p)
+                front.position.z = 0.0
+                front.orientation.x = 0.0
+                front.orientation.y = 0.0
+                front.orientation.z = 0.0
+                front.orientation.w = 1.0
+                self.F.append(front)
+        pose_arr = PoseArray()
+        pose_arr.poses = self.F
+        pose_arr.header.stamp = self.get_clock().now().to_msg()
+        pose_arr.header.frame_id = 'map'
+        self.goles_pub.publish(pose_arr)
+
 
 def main(args=None):
     rclpy.init(args=args)
