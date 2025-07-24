@@ -31,6 +31,10 @@ class FastFrontPropagation(Node):
             self.costmap_callback,
             10
             )
+        self.unknown_cost = 0 # cost assigned to values that are unknown in costmap, might have to tune
+        self.critical_cost = 45 # cost margin, discards all frontier candidates whose cost is greater
+        # than this value
+        self.k = 3
         self.pose = None
         self.slam_map = None
         self.lattice_vector = None 
@@ -68,19 +72,39 @@ class FastFrontPropagation(Node):
         self.cm_info = msg.info
     
     # ======================== UTILITIES ========================
-    def world_to_map(self, world_x, world_y):
-        mx = int((world_x - self.map_info.origin.position.x) / self.slam_resolution)
-        my = int((world_y - self.map_info.origin.position.y) / self.slam_resolution)
+    def world_to_map(self, world_x, world_y, resolution, origin):
+        mx = int((world_x - origin.position.x) / resolution)
+        my = int((world_y - origin.position.y) / resolution)
         return mx, my
-    def map_to_world(self, q):
+    def map_to_world(self, q, resolution, origin):
         my, mx = self.rowcol(q)
-        origin_x = self.map_info.origin.position.x
-        origin_y = self.map_info.origin.position.y
+        origin_x = origin.position.x
+        origin_y = origin.position.y
 
-        wx = mx * self.slam_resolution + origin_x
-        wy = my * self.slam_resolution + origin_y
+        wx = mx * resolution + origin_x
+        wy = my * resolution + origin_y
 
         return wx, wy
+    def get_cost(self, q):
+        """
+        Calculates average obstacle cost in a small patch @ index q
+        """
+        wx, wy = self.map_to_world(q, self.slam_resolution, self.map_info.origin)
+        mcx, mcy = self.world_to_map(wx, wy, self.cm_resolution, self.cm_info.origin) 
+        qcm = self.addr(mcx, mcy, self.cm_width)
+        neig = self.get_neighbors(qcm, self.cm_width, self.cm_height)
+        cost = 0
+        n = len(neig)
+        for idx in neig:
+            if 0 <= idx < len(self.costmap):
+                if self.costmap[idx] == -1:
+                    cost += self.unknown_cost / n
+                else:
+                    cost += self.costmap[idx] / n
+            else:
+                cost += self.unknown_cost / n 
+        return cost
+    
 
     def get_seed_idx(self):
         if self.pose is None:
@@ -90,9 +114,10 @@ class FastFrontPropagation(Node):
             x = self.pose.position.x
             y = self.pose.position.y
 
-        mx, my = self.world_to_map(x, y)
+        mx, my = self.world_to_map(x, y, self.slam_resolution, self.map_info.origin)
 
-        max_radius = 20
+        max_radius = int(self.k*np.sqrt(self.slam_height*self.slam_width))
+
         for r in range(max_radius):
             for dx in range(-r, r + 1):
                 for dy in range(-r, r + 1):
@@ -103,20 +128,28 @@ class FastFrontPropagation(Node):
                             return idx
         return None
 
-    def addr(self, x, y):
-        return int(y*self.slam_width + x)
+    def addr(self, x, y, width = None):
+        if width == None:
+            width = self.slam_width
+        return int(y*width + x)
     
-    def rowcol(self, q):
-        col = q % self.slam_width
-        row = q // self.slam_width
+    def rowcol(self, q, width=None):
+        if width == None:
+            width = self.slam_width
+        col = q % width
+        row = q // width
         return row, col
 
-    def get_neighbors(self, q):
+    def get_neighbors(self, q, width = None, height = None):
+        if width == None:
+            width = self.slam_width
+        if height == None:
+            height = self.slam_height
         neighbors = []
-        row, col = self.rowcol(q)
+        row, col = self.rowcol(q, width)
         for i in range(row - 1, row + 2):      
             for j in range(col - 1, col + 2): 
-                if 0 <= i < self.slam_height and 0 <= j < self.slam_width:
+                if 0 <= i < height and 0 <= j < width:
                     if (i, j) != (row, col):
                         neighbors.append(self.addr(j, i))
         return neighbors
@@ -151,15 +184,18 @@ class FastFrontPropagation(Node):
     def extract_frontiers(self):
         for p in self.scan_list:
             neighbors = self.get_neighbors(p)
-            if all(self.slam_map[idx] != 100 for idx in neighbors):
-                front = Pose()
-                front.position.x, front.position.y = self.map_to_world(p)
-                front.position.z = 0.0
-                front.orientation.x = 0.0
-                front.orientation.y = 0.0
-                front.orientation.z = 0.0
-                front.orientation.w = 1.0
-                self.F.append(front)
+            cost = self.get_cost(p)
+            if cost < self.critical_cost: 
+                if all(self.slam_map[idx] != 100 for idx in neighbors):
+                    front = Pose()
+                    front.position.x, front.position.y = self.map_to_world(p, self.slam_resolution, self.map_info.origin)
+                    front.position.z = 0.0
+                    front.orientation.x = 0.0
+                    front.orientation.y = 0.0
+                    front.orientation.z = 0.0
+                    front.orientation.w = 1.0
+                    self.F.append(front)
+
         pose_arr = PoseArray()
         pose_arr.poses = self.F
         pose_arr.header.stamp = self.get_clock().now().to_msg()
@@ -171,7 +207,7 @@ def main(args=None):
     rclpy.init(args=args)
 
     minimal_subscriber = FastFrontPropagation()
-
+    minimal_subscriber.get_logger().info("Node initialized!")
     rclpy.spin(minimal_subscriber)
 
     # Destroy the node explicitly

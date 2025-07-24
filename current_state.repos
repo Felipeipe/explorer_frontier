@@ -1,0 +1,17 @@
+repositories:
+  explorer_bringup:
+    type: git
+    url: https://github.com/Felipeipe/explorer_bringup.git
+    version: develop
+  explorer_core:
+    type: git
+    url: https://github.com/Felipeipe/explorer_core.git
+    version: main
+  explorer_frontier:
+    type: git
+    url: https://github.com/Felipeipe/explorer_frontier.git
+    version: main
+  gz_worlds_and_maps:
+    type: git
+    url: https://github.com/Felipeipe/gz_worlds_and_maps.git
+    version: master
