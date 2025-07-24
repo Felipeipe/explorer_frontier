@@ -7,7 +7,7 @@ def generate_launch_description():
     config_path = PathJoinSubstitution([
         FindPackageShare("explorer_frontier"),
         "params",
-        "frontier_params.yaml"
+        "frontier_detection.yaml"
     ])
     frontier_node = Node(
         package="explorer_frontier",
@@ -24,5 +24,5 @@ def generate_launch_description():
     )
     return LaunchDescription([
         frontier_node,
-        navigator_node
+        # navigator_node
     ])

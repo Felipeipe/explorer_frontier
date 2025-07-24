@@ -1,12 +1,12 @@
 frontier_extractor_node:
   ros__parameters:
     # cost assigned to values that are unknown in costmap, might have to tune
-    unknown_cost: 20
+    unknown_cost: 0
     # cost margin, discards all frontier candidates whose cost is greater than this value
-    critical_cost: 40
+    critical_cost: 50
     k: 2.5
     # ======== clustering ========
     # cluster radius
-    eps: 0.4
+    eps: 0.5
     # minimum samples 
-    min_samples: 4
+    min_samples: 1 

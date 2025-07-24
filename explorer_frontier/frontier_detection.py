@@ -33,10 +33,10 @@ class FastFrontPropagation(Node):
             10
             )
         self.declare_parameter('unknown_cost', 0)
-        self.declare_parameter('critical_cost', 45)
-        self.declare_parameter('k', 3.0)
+        self.declare_parameter('critical_cost', 50)
+        self.declare_parameter('k', 2.5)
         self.declare_parameter('eps', 0.5)
-        self.declare_parameter('min_samples', 3)
+        self.declare_parameter('min_samples', 0)
 
         self.unknown_cost = self.get_parameter('unknown_cost').get_parameter_value().double_value
         self.critical_cost = self.get_parameter('critical_cost').get_parameter_value().double_value
@@ -98,6 +98,10 @@ class FastFrontPropagation(Node):
         """
         Calculates average obstacle cost in a small patch @ index q
         """
+        if self.cm_info is None or self.costmap is None:
+            self.get_logger().warn("Costmap not received yet, skipping cost calculation.")
+            return float('inf')
+            
         wx, wy = self.map_to_world(q, self.slam_resolution, self.map_info.origin)
         mcx, mcy = self.world_to_map(wx, wy, self.cm_resolution, self.cm_info.origin) 
         qcm = self.addr(mcx, mcy, self.cm_width)
@@ -167,15 +171,11 @@ class FastFrontPropagation(Node):
     def cluster_frontiers(self, eps=0.5, min_samples=3):
         if not self.F:
             return None
-
-        # Convertir lista de poses a array de coordenadas
         points = np.array([[p.position.x, p.position.y] for p in self.F])
 
-        # Aplicar clustering
         clustering = DBSCAN(eps=eps, min_samples=min_samples).fit(points)
         labels = clustering.labels_
 
-        # Ignorar ruido (label == -1)
         unique_labels = set(labels) - {-1}
 
         goal_poses = PoseArray()
