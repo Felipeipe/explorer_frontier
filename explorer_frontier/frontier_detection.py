@@ -4,6 +4,7 @@ from rclpy.node import Node
 from nav_msgs.msg import OccupancyGrid 
 from geometry_msgs.msg import PoseArray, PoseWithCovarianceStamped, Pose
 import numpy as np
+from sklearn.cluster import DBSCAN
 
 class FastFrontPropagation(Node):
 
@@ -27,14 +28,22 @@ class FastFrontPropagation(Node):
         )
         self.costmap_sub = self.create_subscription(
             OccupancyGrid,
-            'global_costmap/obstacle_layer',
+            'global_costmap/costmap',
             self.costmap_callback,
             10
             )
-        self.unknown_cost = 0 # cost assigned to values that are unknown in costmap, might have to tune
-        self.critical_cost = 45 # cost margin, discards all frontier candidates whose cost is greater
-        # than this value
-        self.k = 3
+        self.declare_parameter('unknown_cost', 0)
+        self.declare_parameter('critical_cost', 45)
+        self.declare_parameter('k', 3.0)
+        self.declare_parameter('eps', 0.5)
+        self.declare_parameter('min_samples', 3)
+
+        self.unknown_cost = self.get_parameter('unknown_cost').get_parameter_value().double_value
+        self.critical_cost = self.get_parameter('critical_cost').get_parameter_value().double_value
+        self.k = self.get_parameter('k').get_parameter_value().double_value
+        self.eps = self.get_parameter('eps').get_parameter_value().double_value
+        self.min_samples = self.get_parameter('min_samples').get_parameter_value().integer_value
+
         self.pose = None
         self.slam_map = None
         self.lattice_vector = None 
@@ -155,7 +164,37 @@ class FastFrontPropagation(Node):
         return neighbors
 
 
+    def cluster_frontiers(self, eps=0.5, min_samples=3):
+        if not self.F:
+            return None
 
+        # Convertir lista de poses a array de coordenadas
+        points = np.array([[p.position.x, p.position.y] for p in self.F])
+
+        # Aplicar clustering
+        clustering = DBSCAN(eps=eps, min_samples=min_samples).fit(points)
+        labels = clustering.labels_
+
+        # Ignorar ruido (label == -1)
+        unique_labels = set(labels) - {-1}
+
+        goal_poses = PoseArray()
+        goal_poses.header.stamp = self.get_clock().now().to_msg()
+        goal_poses.header.frame_id = 'map'
+
+        for label in unique_labels:
+            cluster_points = points[labels == label]
+            centroid = np.mean(cluster_points, axis=0)
+
+            pose = Pose()
+            pose.position.x = centroid[0]
+            pose.position.y = centroid[1]
+            pose.position.z = 0.0
+            pose.orientation.w = 1.0  # sin orientación específica por ahora
+
+            goal_poses.poses.append(pose)
+
+        return goal_poses 
     # ======================== ALGORITHMS ========================
     def extract_frontier_region(self):
         self.scan_list = set() 
@@ -195,12 +234,9 @@ class FastFrontPropagation(Node):
                     front.orientation.z = 0.0
                     front.orientation.w = 1.0
                     self.F.append(front)
-
-        pose_arr = PoseArray()
-        pose_arr.poses = self.F
-        pose_arr.header.stamp = self.get_clock().now().to_msg()
-        pose_arr.header.frame_id = 'map'
-        self.goles_pub.publish(pose_arr)
+        goal_arr = self.cluster_frontiers(eps=self.eps, min_samples=self.min_samples)
+        if goal_arr:
+            self.goles_pub.publish(goal_arr)
 
 
 def main(args=None):

@@ -20,7 +20,8 @@ setup(
     tests_require=['pytest'],
     entry_points={
         'console_scripts': [
-            'frontier_detection = explorer_frontier.frontier_detection:main'
+            'frontier_detection = explorer_frontier.frontier_detection:main',
+            'navigator = explorer_frontier.navigator:main'
         ],
     },
 )
