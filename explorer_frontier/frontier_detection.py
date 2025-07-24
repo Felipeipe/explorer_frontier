@@ -32,18 +32,27 @@ class FastFrontPropagation(Node):
             self.costmap_callback,
             10
             )
+        self.clusters = self.create_publisher(
+            PoseArray,
+            '/frontiers',
+            10
+        )
         self.declare_parameter('unknown_cost', 0)
         self.declare_parameter('critical_cost', 50)
         self.declare_parameter('k', 2.5)
         self.declare_parameter('eps', 0.5)
-        self.declare_parameter('min_samples', 0)
+        self.declare_parameter('min_samples', 1)
 
-        self.unknown_cost = self.get_parameter('unknown_cost').get_parameter_value().double_value
-        self.critical_cost = self.get_parameter('critical_cost').get_parameter_value().double_value
-        self.k = self.get_parameter('k').get_parameter_value().double_value
-        self.eps = self.get_parameter('eps').get_parameter_value().double_value
-        self.min_samples = self.get_parameter('min_samples').get_parameter_value().integer_value
-
+        self.unknown_cost = self.get_parameter('unknown_cost').value
+        self.critical_cost = self.get_parameter('critical_cost').value
+        self.k = self.get_parameter('k').value
+        self.eps = self.get_parameter('eps').value
+        self.min_samples = self.get_parameter('min_samples').value
+        # self.unknown_cost = 0
+        # self.critical_cost = 50
+        # self.k = 2.5
+        # self.eps = 0.5
+        # self.min_samples = 0
         self.pose = None
         self.slam_map = None
         self.lattice_vector = None 
@@ -237,7 +246,11 @@ class FastFrontPropagation(Node):
         goal_arr = self.cluster_frontiers(eps=self.eps, min_samples=self.min_samples)
         if goal_arr:
             self.goles_pub.publish(goal_arr)
-
+        pose_arr = PoseArray()
+        pose_arr.header.stamp = self.get_clock().now().to_msg()
+        pose_arr.header.frame_id = 'map'
+        pose_arr.poses = self.F
+        self.clusters.publish(pose_arr)
 
 def main(args=None):
     rclpy.init(args=args)

@@ -1,7 +1,7 @@
 import rclpy
 from rclpy.node import Node
 from rclpy.action import ActionClient
-from geometry_msgs.msg import PoseArray
+from geometry_msgs.msg import PoseArray, PoseStamped
 from nav2_msgs.action import NavigateThroughPoses
 
 class Navigator(Node):
@@ -19,26 +19,23 @@ class Navigator(Node):
         self.nav_client = ActionClient(self, NavigateThroughPoses, 'navigate_through_poses')
         self.get_logger().info("Navigator node ready, waiting for frontier poses...")
 
+
     def poses_callback(self, msg: PoseArray):
-        if not msg.poses:
-            self.get_logger().warn("Received empty PoseArray!")
+        if not self.nav_client.wait_for_server(timeout_sec=5.0):
+            self.get_logger().warn("Action server not available after waiting")
             return
 
-        self.get_logger().info("Waiting for navigate_through_poses action server...")
-        self.nav_client.wait_for_server()
-
         goal_msg = NavigateThroughPoses.Goal()
-        goal_msg.poses = msg.poses
-        goal_msg.behavior_tree = ''
+        for pose in msg.poses:
+            stamped = PoseStamped()
+            stamped.header.stamp = self.get_clock().now().to_msg()
+            stamped.header.frame_id = "map"  # o el frame que corresponda
+            stamped.pose = pose
+            goal_msg.poses.append(stamped)
 
-        self.get_logger().info(f"Sending {len(msg.poses)} poses to NavigateThroughPoses...")
-        send_goal_future = self.nav_client.send_goal_async(
-            goal_msg,
-            feedback_callback=self.feedback_callback
-        )
+        self.get_logger().info(f"Sending {len(goal_msg.poses)} poses to NavigateThroughPoses...")
 
-        send_goal_future.add_done_callback(self.goal_response_callback)
-
+        self.nav_client.send_goal_async(goal_msg)
     def goal_response_callback(self, future):
         goal_handle = future.result()
         if not goal_handle.accepted:
