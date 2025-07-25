@@ -3,6 +3,7 @@ import rclpy
 from rclpy.node import Node
 from nav_msgs.msg import OccupancyGrid 
 from geometry_msgs.msg import PoseArray, PoseWithCovarianceStamped, Pose
+from visualization_msgs.msg import MarkerArray, Marker
 import numpy as np
 from sklearn.cluster import DBSCAN
 
@@ -10,6 +11,8 @@ class FastFrontPropagation(Node):
 
     def __init__(self):
         super().__init__('frontier_extractor_node')
+
+        # =============== SUBSCRIBERS ====================
         self.map_sub = self.create_subscription(
             OccupancyGrid,
             'map',
@@ -21,20 +24,28 @@ class FastFrontPropagation(Node):
             self.pose_callback,
             10,
         )
-        self.goles_pub = self.create_publisher(
-            PoseArray,
-            '/frontier_region_list',
-            10
-        )
         self.costmap_sub = self.create_subscription(
             OccupancyGrid,
             'global_costmap/costmap',
             self.costmap_callback,
             10
-            )
+        )
+
+        # =============== PUBLISHERS ====================
+
+        self.goles_pub = self.create_publisher(
+            PoseArray,
+            '/frontier_region_list',
+            10
+        )
         self.clusters = self.create_publisher(
             PoseArray,
             '/frontiers',
+            10
+        )
+        self.seed_idx_pub = self.create_publisher(
+            MarkerArray,
+            '/seed_indices',
             10
         )
         self.declare_parameter('unknown_cost', 0)
@@ -42,17 +53,21 @@ class FastFrontPropagation(Node):
         self.declare_parameter('k', 2.5)
         self.declare_parameter('eps', 0.5)
         self.declare_parameter('min_samples', 1)
+        self.declare_parameter('max_seeds', 1)
 
         self.unknown_cost = self.get_parameter('unknown_cost').value
         self.critical_cost = self.get_parameter('critical_cost').value
         self.k = self.get_parameter('k').value
         self.eps = self.get_parameter('eps').value
         self.min_samples = self.get_parameter('min_samples').value
-        # self.unknown_cost = 0
-        # self.critical_cost = 50
-        # self.k = 2.5
-        # self.eps = 0.5
-        # self.min_samples = 0
+        self.max_seeds = self.get_parameter('max_seeds').value
+
+        self.get_logger().info(
+            f'\n{self.unknown_cost = } \n{self.critical_cost = } \n{self.k = } \n{self.eps = } \n{self.min_samples = } \n{self.max_seeds = }'
+        )
+
+        self.timer = self.create_timer(3.0, self.periodic_check)
+        self.marker_array = MarkerArray()
         self.pose = None
         self.slam_map = None
         self.lattice_vector = None 
@@ -90,6 +105,29 @@ class FastFrontPropagation(Node):
         self.cm_info = msg.info
     
     # ======================== UTILITIES ========================
+    def seed_to_marker(self, q):
+        wx, wy = self.map_to_world(q, self.slam_resolution, self.map_info.origin)
+
+        marker = Marker()
+        marker.header.frame_id = 'map'
+        marker.header.stamp = self.get_clock().now().to_msg()
+        marker.ns = "seed_points"
+        marker.id = q
+        marker.type = Marker.SPHERE
+        marker.action = Marker.ADD
+        marker.pose.position.x = wx
+        marker.pose.position.y = wy
+        marker.pose.position.z = 0.0
+        marker.pose.orientation.w = 1.0
+        marker.scale.x = 0.1
+        marker.scale.y = 0.1
+        marker.scale.z = 0.1
+        marker.color.a = 1.0
+        marker.color.r = 1.0
+        marker.color.g = 0.0
+        marker.color.b = 0.0
+        return marker
+
     def world_to_map(self, world_x, world_y, resolution, origin):
         mx = int((world_x - origin.position.x) / resolution)
         my = int((world_y - origin.position.y) / resolution)
@@ -103,6 +141,12 @@ class FastFrontPropagation(Node):
         wy = my * resolution + origin_y
 
         return wx, wy
+
+    def periodic_check(self):
+        if len(self.F) <= 1:
+            self.get_logger().info("Low number of frontiers, forcing recomputation")
+            self.extract_frontier_region()
+
     def get_cost(self, q):
         """
         Calculates average obstacle cost in a small patch @ index q
@@ -126,29 +170,37 @@ class FastFrontPropagation(Node):
             else:
                 cost += self.unknown_cost / n 
         return cost
-    
 
-    def get_seed_idx(self):
+    def get_seed_indices(self, max_seeds=None):
+        if max_seeds == None:
+            max_seeds = self.max_seeds
         if self.pose is None:
-            x = 0.0
-            y = 0.0
-        else:  
+            x, y = 0.0, 0.0
+        else:
             x = self.pose.position.x
             y = self.pose.position.y
 
         mx, my = self.world_to_map(x, y, self.slam_resolution, self.map_info.origin)
+        max_radius = int(self.k * np.sqrt(self.slam_height * self.slam_width))
 
-        max_radius = int(self.k*np.sqrt(self.slam_height*self.slam_width))
-
+        seeds = []
         for r in range(max_radius):
             for dx in range(-r, r + 1):
                 for dy in range(-r, r + 1):
                     nx, ny = mx + dx, my + dy
                     if 0 <= nx < self.slam_width and 0 <= ny < self.slam_height:
                         idx = self.addr(nx, ny)
-                        if self.slam_map[idx] == -1:
-                            return idx
-        return None
+                        if self.slam_map[idx] == -1 and self.lattice_vector[idx] == -1:
+                            seeds.append(idx)
+                            self.marker_array.markers.append(self.seed_to_marker(idx))
+                            if len(seeds) >= max_seeds:
+                                self.seed_idx_pub.publish(self.marker_array)
+                                return seeds
+
+        self.seed_idx_pub.publish(self.marker_array)
+        return seeds
+
+
 
     def addr(self, x, y, width = None):
         if width == None:
@@ -210,14 +262,23 @@ class FastFrontPropagation(Node):
         self.front_queue = []
         self.F = []
         self.lattice_vector = np.full(self.slam_width*self.slam_height,-1, dtype=int)
+        self.marker_array.markers = []
         # in this case, -1 represents far, 0 represents trial and 
         # 1 represents known
         self.march_front()
         self.extract_frontiers()
+
     def march_front(self):
-        self.front_queue.append(self.get_seed_idx())
+        seed_indices = self.get_seed_indices()
+        self.front_queue.extend(seed_indices)
+        for s in seed_indices:
+            self.lattice_vector[s] = 1
+
         while self.front_queue:
+            # ma = self.list_to_marker_array(self.front_queue)
+            # self.seed_idx_pub.publish(ma)
             q = self.front_queue.pop()
+
             self.lattice_vector[q] = 1
             neighbors = self.get_neighbors(q)
             for idx in neighbors:
@@ -254,14 +315,8 @@ class FastFrontPropagation(Node):
 
 def main(args=None):
     rclpy.init(args=args)
-
     minimal_subscriber = FastFrontPropagation()
-    minimal_subscriber.get_logger().info("Node initialized!")
     rclpy.spin(minimal_subscriber)
-
-    # Destroy the node explicitly
-    # (optional - otherwise it will be done automatically
-    # when the garbage collector destroys the node object)
     minimal_subscriber.destroy_node()
     rclpy.shutdown()
 
