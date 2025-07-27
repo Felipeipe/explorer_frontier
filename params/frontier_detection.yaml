@@ -8,10 +8,17 @@ frontier_detection_node:
     k: 2.0
     # maximum number of seeds obtained by the get_seed_indices method
     max_seeds: 2 
+    # extra pose in order to avoid the robot being stalled at the initialization
+    # of the script
     xtra_x: -0.4
     xtra_y: -0.08
+    # store frontier points found in previous iterations.
+    # Those frontier points are discarded when the map info is updated
+    # in those regions
+    set_frontier_permanence: true
     # ======== clustering ========
     # cluster radius
     eps: 0.4
     # minimum samples 
     min_samples: 3
+    

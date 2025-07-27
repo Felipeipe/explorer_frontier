@@ -65,25 +65,27 @@ class FastFrontPropagation(Node):
             10
         )
         # Parameters, see params/frontier_detection.yaml
-        self.declare_parameter('unknown_cost', 0)
-        self.declare_parameter('critical_cost', 50)
-        self.declare_parameter('k', 2.5)
-        self.declare_parameter('eps', 0.5)
-        self.declare_parameter('min_samples', 1)
-        self.declare_parameter('max_seeds', 1)
-        self.declare_parameter('number_of_map_updates', 5)
-        self.declare_parameter('xtra_x', -0.7)
-        self.declare_parameter('xtra_y', 0.0)
+        self.declare_parameter('unknown_cost',               0)
+        self.declare_parameter('critical_cost',             50)
+        self.declare_parameter('k',                        2.5)
+        self.declare_parameter('eps',                      0.5)
+        self.declare_parameter('min_samples',                1)
+        self.declare_parameter('max_seeds',                  1)
+        self.declare_parameter('number_of_map_updates',      5)
+        self.declare_parameter('xtra_x',                  -0.7)
+        self.declare_parameter('xtra_y',                   0.0)
+        self.declare_parameter('set_frontier_permanence', True)
 
-        self.unknown_cost = self.get_parameter('unknown_cost').value
-        self.critical_cost = self.get_parameter('critical_cost').value
-        self.k = self.get_parameter('k').value
-        self.eps = self.get_parameter('eps').value
-        self.min_samples = self.get_parameter('min_samples').value
-        self.max_seeds = self.get_parameter('max_seeds').value
-        self.map_updates = self.get_parameter('number_of_map_updates').value
-        self.xtra_x = self.get_parameter('xtra_x').value
-        self.xtra_y = self.get_parameter('xtra_y').value
+        self.unknown_cost            = self.get_parameter('unknown_cost').value
+        self.critical_cost           = self.get_parameter('critical_cost').value
+        self.k                       = self.get_parameter('k').value
+        self.eps                     = self.get_parameter('eps').value
+        self.min_samples             = self.get_parameter('min_samples').value
+        self.max_seeds               = self.get_parameter('max_seeds').value
+        self.map_updates             = self.get_parameter('number_of_map_updates').value
+        self.xtra_x                  = self.get_parameter('xtra_x').value
+        self.xtra_y                  = self.get_parameter('xtra_y').value
+        self.set_frontier_permanence = self.get_parameter('set_frontier_permanence').value
 
         # Auxiliary variables
         self.marker_array = MarkerArray()
@@ -297,12 +299,13 @@ class FastFrontPropagation(Node):
         prev_frontiers = self.F.copy()
         valid_frontiers = []
 
-        for pose in prev_frontiers:
-            mx, my = self.world_to_map(pose.position.x, pose.position.y, self.slam_resolution, self.map_info.origin)
-            if 0 <= mx < self.slam_width and 0 <= my < self.slam_height:
-                idx = self.addr(mx, my)
-                if self.slam_map[idx] == -1:
-                    valid_frontiers.append(pose)
+        if self.set_frontier_permanence:
+            for pose in prev_frontiers:
+                mx, my = self.world_to_map(pose.position.x, pose.position.y, self.slam_resolution, self.map_info.origin)
+                if 0 <= mx < self.slam_width and 0 <= my < self.slam_height:
+                    idx = self.addr(mx, my)
+                    if self.slam_map[idx] == -1:
+                        valid_frontiers.append(pose)
 
         self.scan_list = set()
         self.front_queue = []
