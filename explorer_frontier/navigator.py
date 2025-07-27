@@ -45,12 +45,12 @@ class Navigator(Node):
 
         distances = np.array([
             np.linalg.norm([pose.position.x - rx, pose.position.y - ry])
-            for pose in msg.poses
+            for pose in self.F.poses
         ])
 
         sorted_indices = np.argsort(distances)
 
-        sorted_poses = [msg.poses[i] for i in sorted_indices]
+        sorted_poses = [self.F[i] for i in sorted_indices]
 
         if not self.nav_client.wait_for_server(timeout_sec=5.0):
             self.get_logger().warn("Action server not available after waiting")

@@ -24,5 +24,5 @@ def generate_launch_description():
     )
     return LaunchDescription([
         frontier_node,
-        navigator_node
+        # navigator_node
     ])

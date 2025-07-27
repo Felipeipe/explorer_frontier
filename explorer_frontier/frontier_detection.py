@@ -1,17 +1,26 @@
 #!/usr/bin/env python3
+
 import rclpy
 from rclpy.node import Node
+from rclpy.action import ActionClient
 from nav_msgs.msg import OccupancyGrid 
-from geometry_msgs.msg import PoseArray, PoseWithCovarianceStamped, Pose
+from nav2_msgs.action import NavigateThroughPoses
+from geometry_msgs.msg import PoseArray, PoseWithCovarianceStamped, Pose, PoseStamped
 from visualization_msgs.msg import MarkerArray, Marker
+
 import numpy as np
 from sklearn.cluster import DBSCAN
+
 
 class FastFrontPropagation(Node):
 
     def __init__(self):
         super().__init__('frontier_extractor_node')
+        # ===============   SERVICES  ==================== 
+        self.nav_client = ActionClient(self, NavigateThroughPoses, 'navigate_through_poses')
 
+        if not self.nav_client.wait_for_server(timeout_sec=5.0):
+            self.get_logger().warn("Action server not available after waiting")
         # =============== SUBSCRIBERS ====================
         self.map_sub = self.create_subscription(
             OccupancyGrid,
@@ -30,7 +39,7 @@ class FastFrontPropagation(Node):
             self.costmap_callback,
             10
         )
-
+        self.get_logger().info("After subscribers")
         # =============== PUBLISHERS ====================
 
         self.goles_pub = self.create_publisher(
@@ -48,12 +57,14 @@ class FastFrontPropagation(Node):
             '/seed_indices',
             10
         )
+        # Parameters, see params/frontier_detection.yaml
         self.declare_parameter('unknown_cost', 0)
         self.declare_parameter('critical_cost', 50)
         self.declare_parameter('k', 2.5)
         self.declare_parameter('eps', 0.5)
         self.declare_parameter('min_samples', 1)
         self.declare_parameter('max_seeds', 1)
+        self.declare_parameter('number_of_map_updates', 5)
 
         self.unknown_cost = self.get_parameter('unknown_cost').value
         self.critical_cost = self.get_parameter('critical_cost').value
@@ -61,14 +72,11 @@ class FastFrontPropagation(Node):
         self.eps = self.get_parameter('eps').value
         self.min_samples = self.get_parameter('min_samples').value
         self.max_seeds = self.get_parameter('max_seeds').value
+        self.map_updates = self.get_parameter('number_of_map_updates').value
 
-        self.get_logger().info(
-            f'\n{self.unknown_cost = } \n{self.critical_cost = } \n{self.k = } \n{self.eps = } \n{self.min_samples = } \n{self.max_seeds = }'
-        )
-
-        self.timer = self.create_timer(3.0, self.periodic_check)
+        # Auxiliary variables
         self.marker_array = MarkerArray()
-        self.pose = None
+        self.robot_pose = None
         self.slam_map = None
         self.lattice_vector = None 
         self.scan_list = set()
@@ -83,19 +91,23 @@ class FastFrontPropagation(Node):
         self.cm_width = None
         self.cm_resolution = None
         self.cm_info = None
+        # 0: success, 1: waiting, -1: error
+        self.nav_status = 1
+        self.initialized = False
 
     # ======================== CALLBACKS ========================
     def map_callback(self, msg:OccupancyGrid):
-
         self.slam_map = msg.data
         self.slam_width = msg.info.width
         self.slam_height = msg.info.height
         self.slam_resolution = msg.info.resolution
-        self.map_info = msg.info
-        self.extract_frontier_region()
+        self.map_info = msg.info 
+        if self.nav_status == 0 or not self.initialized:
+            self.initialized = True
+            self.extract_frontier_region()
 
     def pose_callback(self, msg:PoseWithCovarianceStamped):
-        self.pose = msg.pose.pose 
+        self.robot_pose = msg.pose.pose 
 
     def costmap_callback(self, msg: OccupancyGrid):
         self.costmap = msg.data
@@ -104,6 +116,60 @@ class FastFrontPropagation(Node):
         self.cm_resolution = msg.info.resolution
         self.cm_info = msg.info
     
+    def go_to_frontiers(self):
+        if self.goal_poses is None or not self.goal_poses.poses:
+            self.get_logger().warn("No goals available for navigation.")
+            # self.go_to_frontiers()
+        if self.robot_pose is None:
+            self.get_logger().warn("Robot pose not received yet. Setting it to zero")
+            self.robot_pose = (0.0, 0.0)
+        rx, ry = self.robot_pose
+
+        distances = np.array([
+            np.linalg.norm([pose.pose.position.x - rx, pose.pose.position.y - ry])
+            for pose in self.goal_poses.poses
+        ])
+
+        sorted_indices = np.argsort(distances)
+
+        sorted_poses = [self.goal_poses.poses[i] for i in sorted_indices]
+
+
+        goal_msg = NavigateThroughPoses.Goal()
+        # for pose in sorted_poses:
+        #     stamped = PoseStamped()
+        #     stamped.header.stamp = self.get_clock().now().to_msg()
+        #     stamped.header.frame_id = "map"
+        #     stamped.pose = pose
+        #     goal_msg.poses.append(stamped)
+        goal_msg.poses = sorted_poses
+        self.get_logger().info(f"Sending {len(goal_msg.poses)} poses to NavigateThroughPoses...")
+        future = self.nav_client.send_goal_async(goal_msg, feedback_callback=self.feedback_callback)
+
+        future.add_done_callback(self.goal_response_callback)
+
+    def goal_response_callback(self, future):
+        goal_handle = future.result()
+        if not goal_handle.accepted:
+            self.get_logger().warn('Goal was rejected by NavigateThroughPoses server.')
+            return
+
+        self.get_logger().info('Goal accepted, waiting for result...')
+        self._get_result_future = goal_handle.get_result_async()
+        self._get_result_future.add_done_callback(self.result_callback)
+
+    def feedback_callback(self, feedback_msg):
+        feedback = feedback_msg.feedback
+        print(f"[Feedback] Navegando hacia la pose {feedback.current_pose}")
+
+    def result_callback(self, future):
+        result = future.result().result
+        if result.error_code == 0:
+            self.get_logger().info("Navigation completed successfully!")
+            self.nav_status = 0
+        else:
+            self.get_logger().warn(f"Navigation failed with code: {result.error_code}")
+
     # ======================== UTILITIES ========================
     def seed_to_marker(self, q):
         wx, wy = self.map_to_world(q, self.slam_resolution, self.map_info.origin)
@@ -142,11 +208,6 @@ class FastFrontPropagation(Node):
 
         return wx, wy
 
-    def periodic_check(self):
-        if len(self.F) <= 1:
-            self.get_logger().info("Low number of frontiers, forcing recomputation")
-            self.extract_frontier_region()
-
     def get_cost(self, q):
         """
         Calculates average obstacle cost in a small patch @ index q
@@ -174,11 +235,11 @@ class FastFrontPropagation(Node):
     def get_seed_indices(self, max_seeds=None):
         if max_seeds == None:
             max_seeds = self.max_seeds
-        if self.pose is None:
+        if self.robot_pose is None:
             x, y = 0.0, 0.0
         else:
-            x = self.pose.position.x
-            y = self.pose.position.y
+            x = self.robot_pose.position.x
+            y = self.robot_pose.position.y
 
         mx, my = self.world_to_map(x, y, self.slam_resolution, self.map_info.origin)
         max_radius = int(self.k * np.sqrt(self.slam_height * self.slam_width))
@@ -247,24 +308,35 @@ class FastFrontPropagation(Node):
             cluster_points = points[labels == label]
             centroid = np.mean(cluster_points, axis=0)
 
-            pose = Pose()
-            pose.position.x = centroid[0]
-            pose.position.y = centroid[1]
-            pose.position.z = 0.0
-            pose.orientation.w = 1.0  # sin orientación específica por ahora
-
+            pose = PoseStamped()
+            pose.pose.position.x = centroid[0]
+            pose.pose.position.y = centroid[1]
+            pose.pose.position.z = 0.0
+            pose.pose.orientation.w = 1.0  
+            pose.header.frame_id = 'map'
+            pose.header.stamp = self.get_clock().now().to_msg()
             goal_poses.poses.append(pose)
 
         return goal_poses 
     # ======================== ALGORITHMS ========================
     def extract_frontier_region(self):
-        self.scan_list = set() 
+
+        prev_frontiers = self.F.copy()
+        valid_frontiers = []
+
+        # for pose in prev_frontiers:
+        #     mx, my = self.world_to_map(pose.position.x, pose.position.y, self.slam_resolution, self.map_info.origin)
+        #     if 0 <= mx < self.slam_width and 0 <= my < self.slam_height:
+        #         idx = self.addr(mx, my)
+        #         if self.slam_map[idx] == -1:
+        #             valid_frontiers.append(pose)
+
+        self.scan_list = set()
         self.front_queue = []
-        self.F = []
-        self.lattice_vector = np.full(self.slam_width*self.slam_height,-1, dtype=int)
+        self.F = valid_frontiers
+        self.lattice_vector = np.full(self.slam_width * self.slam_height, -1, dtype=int)
         self.marker_array.markers = []
-        # in this case, -1 represents far, 0 represents trial and 
-        # 1 represents known
+
         self.march_front()
         self.extract_frontiers()
 
@@ -304,14 +376,13 @@ class FastFrontPropagation(Node):
                     front.orientation.z = 0.0
                     front.orientation.w = 1.0
                     self.F.append(front)
-        goal_arr = self.cluster_frontiers(eps=self.eps, min_samples=self.min_samples)
-        if goal_arr:
-            self.goles_pub.publish(goal_arr)
+        self.goal_poses = self.cluster_frontiers(eps=self.eps, min_samples=self.min_samples)
         pose_arr = PoseArray()
         pose_arr.header.stamp = self.get_clock().now().to_msg()
         pose_arr.header.frame_id = 'map'
         pose_arr.poses = self.F
         self.clusters.publish(pose_arr)
+        self.go_to_frontiers()
 
 def main(args=None):
     rclpy.init(args=args)
