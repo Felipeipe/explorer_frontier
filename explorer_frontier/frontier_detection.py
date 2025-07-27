@@ -7,7 +7,7 @@ from nav_msgs.msg import OccupancyGrid
 from nav2_msgs.action import NavigateThroughPoses
 from geometry_msgs.msg import PoseArray, PoseWithCovarianceStamped, Pose, PoseStamped
 from visualization_msgs.msg import MarkerArray, Marker
-
+from std_msgs.msg import Int32
 import numpy as np
 from sklearn.cluster import DBSCAN
 
@@ -39,9 +39,15 @@ class FastFrontPropagation(Node):
             self.costmap_callback,
             10
         )
-        self.get_logger().info("After subscribers")
-        # =============== PUBLISHERS ====================
+        self.remaining_poses_sub = self.create_subscription(
+            Int32,
+            '/poses_remaining',
+            self.remaining_poses_callback,
+            10     
+        )
 
+        # =============== PUBLISHERS ====================
+        
         self.goles_pub = self.create_publisher(
             PoseArray,
             '/frontier_region_list',
@@ -91,6 +97,7 @@ class FastFrontPropagation(Node):
         self.cm_width = None
         self.cm_resolution = None
         self.cm_info = None
+        self.remaining_poses = None
 
     # ======================== CALLBACKS ========================
     def map_callback(self, msg:OccupancyGrid):
@@ -99,7 +106,8 @@ class FastFrontPropagation(Node):
         self.slam_height = msg.info.height
         self.slam_resolution = msg.info.resolution
         self.map_info = msg.info 
-        self.extract_frontier_region()
+        if self.remaining_poses is None or self.remaining_poses <= 1:
+            self.extract_frontier_region()
 
     def pose_callback(self, msg:PoseWithCovarianceStamped):
         self.robot_pose = msg.pose.pose 
@@ -110,7 +118,10 @@ class FastFrontPropagation(Node):
         self.cm_height = msg.info.height
         self.cm_resolution = msg.info.resolution
         self.cm_info = msg.info
-    
+
+    def remaining_poses_callback(self, msg:Int32):
+        self.remaining_poses = msg.data
+
     # ======================== UTILITIES ========================
     def seed_to_marker(self, q):
         wx, wy = self.map_to_world(q, self.slam_resolution, self.map_info.origin)
