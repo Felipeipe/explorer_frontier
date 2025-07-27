@@ -34,6 +34,7 @@ class Navigator(Node):
         self.goal_poses = []  
         self.current_index = 0
         self.nav_client = ActionClient(self, NavigateToPose, 'navigate_to_pose')
+        self.reached = False
         self.get_logger().info("Navigator node ready, waiting for frontier poses...")
 
     def robot_pose_callback(self, msg: PoseWithCovarianceStamped):
@@ -78,27 +79,35 @@ class Navigator(Node):
         goal_msg.pose = stamped  # Nota: NavigateToPose usa `pose`, no `poses`
 
         self.get_logger().info(f"Sending pose {self.current_index+1}/{len(self.goal_poses)} to NavigateToPose...")
-        self.nav_client.send_goal_async(goal_msg, feedback_callback=self.feedback_callback)\
-            .add_done_callback(self.goal_response_callback)
+        goal_async = self.nav_client.send_goal_async(goal_msg, feedback_callback=self.feedback_callback)
+        goal_async.add_done_callback(self.goal_response_callback)
 
     def goal_response_callback(self, future):
         goal_handle = future.result()
         if not goal_handle.accepted:
             self.get_logger().warn(f"Goal {self.current_index+1} was rejected.")
             return
-        self.get_logger().info("Goal accepted, waiting for result...")
+        # self.get_logger().info("Goal accepted, waiting for result...")
         goal_handle.get_result_async().add_done_callback(self.result_callback)
 
     def feedback_callback(self, feedback_msg):
-        # NavigateToPose feedback solo tiene `current_pose`, no poses restantes
-        pass
-
-    def result_callback(self, future):
-        result = future.result().result
-        if result.error_code == 0:
+        self.distance_remaining = feedback_msg.feedback.distance_remaining
+        self.get_logger().info(f'Distance remaining: {self.distance_remaining}')
+        if self.distance_remaining < 0.4:
             self.get_logger().info(f"Goal {self.current_index+1} completed successfully.")
-        else:
-            self.get_logger().warn(f"Goal {self.current_index+1} failed with code: {result.error_code}")
-        
-        self.current_index += 1
-        self.navigate_to_next()
+            self.current_index += 1
+            self.navigate_to_next()
+    def result_callback(self, future):
+        result = future.result().result 
+
+def main(args=None):
+    rclpy.init(args=args)
+
+    navigator = Navigator()
+    rclpy.spin(navigator)
+
+    navigator.destroy_node()
+    rclpy.shutdown()
+
+if __name__ == '__main__':
+    main()

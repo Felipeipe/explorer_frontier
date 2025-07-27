@@ -15,7 +15,7 @@ frontier_detection_node:
     # store frontier points found in previous iterations.
     # Those frontier points are discarded when the map info is updated
     # in those regions
-    set_frontier_permanence: true
+    set_frontier_permanence: false
     # ======== clustering ========
     # cluster radius
     eps: 0.4
