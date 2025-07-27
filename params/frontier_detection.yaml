@@ -15,10 +15,18 @@ frontier_detection_node:
     # store frontier points found in previous iterations.
     # Those frontier points are discarded when the map info is updated
     # in those regions
-    set_frontier_permanence: false
+    set_frontier_permanence: true
     # ======== clustering ========
     # cluster radius
     eps: 0.4
     # minimum samples 
     min_samples: 3
-    
+ 
+single_pose_navigator_node:
+  ros__parameters:
+    # discards goal poses in function of their similarity 
+    similarity_tolerance: 0.005
+    # Amount of seconds that the robot waits before calling
+    # spin recovery (if the robot isn't moving)
+    spin_wait_time: 5.0
+
