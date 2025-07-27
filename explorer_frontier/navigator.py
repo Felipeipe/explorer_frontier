@@ -3,6 +3,8 @@ from rclpy.node import Node
 from rclpy.action import ActionClient
 from geometry_msgs.msg import PoseArray, PoseStamped, PoseWithCovarianceStamped
 from nav2_msgs.action import NavigateThroughPoses
+from std_msgs.msg import Int32
+
 import numpy as np
 
 class Navigator(Node):
@@ -22,6 +24,11 @@ class Navigator(Node):
             self.robot_pose_callback,
             10
         )
+        self.poses_remaining = self.create_publisher(
+            Int32,
+            '/poses_remaining',
+            10
+        )
         self.robot_pose = None
         self.goal_poses = None
         self.nav_client = ActionClient(self, NavigateThroughPoses, 'navigate_through_poses')
@@ -29,7 +36,7 @@ class Navigator(Node):
 
     def robot_pose_callback(self, msg:PoseWithCovarianceStamped):
         self.robot_pose = msg.pose.pose.position.x, msg.pose.pose.position.y
-
+        
     def poses_callback(self, msg: PoseArray):
         if self.robot_pose is None:
             self.get_logger().warn("Robot pose not received yet. Setting it to zero")
@@ -79,12 +86,13 @@ class Navigator(Node):
         self._get_result_future.add_done_callback(self.result_callback)
 
     def feedback_callback(self, feedback_msg):
-        pass
+        poses_remaining = Int32()
+        poses_remaining.data = feedback_msg.feedback.number_of_poses_remaining
+        self.poses_remaining.publish(poses_remaining)
+
     def result_callback(self, future):
         result = future.result().result
-        if result.error_code == 0:
-            self.get_logger().info("Navigation completed successfully!")
-        else:
+        if result.error_code != 0:
             self.get_logger().warn(f"Navigation failed with code: {result.error_code}")
 
 def main(args=None):
