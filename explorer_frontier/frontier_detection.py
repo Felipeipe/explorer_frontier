@@ -71,6 +71,8 @@ class FastFrontPropagation(Node):
         self.declare_parameter('min_samples', 1)
         self.declare_parameter('max_seeds', 1)
         self.declare_parameter('number_of_map_updates', 5)
+        self.declare_parameter('xtra_x', -0.7)
+        self.declare_parameter('xtra_y', 0.0)
 
         self.unknown_cost = self.get_parameter('unknown_cost').value
         self.critical_cost = self.get_parameter('critical_cost').value
@@ -79,6 +81,8 @@ class FastFrontPropagation(Node):
         self.min_samples = self.get_parameter('min_samples').value
         self.max_seeds = self.get_parameter('max_seeds').value
         self.map_updates = self.get_parameter('number_of_map_updates').value
+        self.xtra_x = self.get_parameter('xtra_x').value
+        self.xtra_y = self.get_parameter('xtra_y').value
 
         # Auxiliary variables
         self.marker_array = MarkerArray()
@@ -271,18 +275,25 @@ class FastFrontPropagation(Node):
             pose.orientation.w = 1.0  
             goal_poses.poses.append(pose)
         return goal_poses 
+    def extra_pose(self):
+
+        front = Pose()
+        front.position.x, front.position.y = self.xtra_x, self.xtra_y
+        front.position.z = 0.0
+        front.orientation.w = 1.0
+        return front
     # ======================== ALGORITHMS ========================
     def extract_frontier_region(self):
 
         prev_frontiers = self.F.copy()
         valid_frontiers = []
 
-        # for pose in prev_frontiers:
-        #     mx, my = self.world_to_map(pose.position.x, pose.position.y, self.slam_resolution, self.map_info.origin)
-        #     if 0 <= mx < self.slam_width and 0 <= my < self.slam_height:
-        #         idx = self.addr(mx, my)
-        #         if self.slam_map[idx] == -1:
-        #             valid_frontiers.append(pose)
+        for pose in prev_frontiers:
+            mx, my = self.world_to_map(pose.position.x, pose.position.y, self.slam_resolution, self.map_info.origin)
+            if 0 <= mx < self.slam_width and 0 <= my < self.slam_height:
+                idx = self.addr(mx, my)
+                if self.slam_map[idx] == -1:
+                    valid_frontiers.append(pose)
 
         self.scan_list = set()
         self.front_queue = []
