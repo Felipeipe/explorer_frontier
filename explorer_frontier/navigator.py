@@ -61,7 +61,7 @@ class Navigator(Node):
         sorted_poses = [msg.poses[i] for i in sorted_indices]
 
         if not self.nav_client.wait_for_server(timeout_sec=5.0):
-            self.get_logger().warn("Action server not available after waiting")
+            self.get_logger().warn("Action server not available after waiting ")
             return
 
         goal_msg = NavigateThroughPoses.Goal()

@@ -25,7 +25,8 @@ setup(
     entry_points={
         'console_scripts': [
             'frontier_detection = explorer_frontier.frontier_detection:main',
-            'navigator = explorer_frontier.navigator:main'
+            'navigator = explorer_frontier.navigator:main',
+            'single_pose_navigator = explorer_frontier.single_pose_navigator:main'
         ],
     },
 )
