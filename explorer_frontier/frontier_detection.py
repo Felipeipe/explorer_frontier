@@ -91,9 +91,6 @@ class FastFrontPropagation(Node):
         self.cm_width = None
         self.cm_resolution = None
         self.cm_info = None
-        # 0: success, 1: waiting, -1: error
-        self.nav_status = 1
-        self.initialized = False
 
     # ======================== CALLBACKS ========================
     def map_callback(self, msg:OccupancyGrid):
@@ -102,9 +99,7 @@ class FastFrontPropagation(Node):
         self.slam_height = msg.info.height
         self.slam_resolution = msg.info.resolution
         self.map_info = msg.info 
-        if self.nav_status == 0 or not self.initialized:
-            self.initialized = True
-            self.extract_frontier_region()
+        self.extract_frontier_region()
 
     def pose_callback(self, msg:PoseWithCovarianceStamped):
         self.robot_pose = msg.pose.pose 
@@ -116,60 +111,6 @@ class FastFrontPropagation(Node):
         self.cm_resolution = msg.info.resolution
         self.cm_info = msg.info
     
-    def go_to_frontiers(self):
-        if self.goal_poses is None or not self.goal_poses.poses:
-            self.get_logger().warn("No goals available for navigation.")
-            # self.go_to_frontiers()
-        if self.robot_pose is None:
-            self.get_logger().warn("Robot pose not received yet. Setting it to zero")
-            self.robot_pose = (0.0, 0.0)
-        rx, ry = self.robot_pose
-
-        distances = np.array([
-            np.linalg.norm([pose.pose.position.x - rx, pose.pose.position.y - ry])
-            for pose in self.goal_poses.poses
-        ])
-
-        sorted_indices = np.argsort(distances)
-
-        sorted_poses = [self.goal_poses.poses[i] for i in sorted_indices]
-
-
-        goal_msg = NavigateThroughPoses.Goal()
-        # for pose in sorted_poses:
-        #     stamped = PoseStamped()
-        #     stamped.header.stamp = self.get_clock().now().to_msg()
-        #     stamped.header.frame_id = "map"
-        #     stamped.pose = pose
-        #     goal_msg.poses.append(stamped)
-        goal_msg.poses = sorted_poses
-        self.get_logger().info(f"Sending {len(goal_msg.poses)} poses to NavigateThroughPoses...")
-        future = self.nav_client.send_goal_async(goal_msg, feedback_callback=self.feedback_callback)
-
-        future.add_done_callback(self.goal_response_callback)
-
-    def goal_response_callback(self, future):
-        goal_handle = future.result()
-        if not goal_handle.accepted:
-            self.get_logger().warn('Goal was rejected by NavigateThroughPoses server.')
-            return
-
-        self.get_logger().info('Goal accepted, waiting for result...')
-        self._get_result_future = goal_handle.get_result_async()
-        self._get_result_future.add_done_callback(self.result_callback)
-
-    def feedback_callback(self, feedback_msg):
-        feedback = feedback_msg.feedback
-        print(f"[Feedback] Navegando hacia la pose {feedback.current_pose}")
-
-    def result_callback(self, future):
-        result = future.result().result
-        if result.error_code == 0:
-            self.get_logger().info("Navigation completed successfully!")
-            self.nav_status = 0
-        else:
-            self.get_logger().warn(f"Navigation failed with code: {result.error_code}")
-
     # ======================== UTILITIES ========================
     def seed_to_marker(self, q):
         wx, wy = self.map_to_world(q, self.slam_resolution, self.map_info.origin)
@@ -280,6 +221,7 @@ class FastFrontPropagation(Node):
             width = self.slam_width
         if height == None:
             height = self.slam_height
+
         neighbors = []
         row, col = self.rowcol(q, width)
         for i in range(row - 1, row + 2):      
@@ -292,7 +234,10 @@ class FastFrontPropagation(Node):
 
     def cluster_frontiers(self, eps=0.5, min_samples=3):
         if not self.F:
-            return None
+            pose_arr = PoseArray()
+            pose_arr.header.stamp = self.get_clock().now().to_msg()
+            pose_arr.header.frame_id = 'map'
+            return pose_arr
         points = np.array([[p.position.x, p.position.y] for p in self.F])
 
         clustering = DBSCAN(eps=eps, min_samples=min_samples).fit(points)
@@ -308,15 +253,12 @@ class FastFrontPropagation(Node):
             cluster_points = points[labels == label]
             centroid = np.mean(cluster_points, axis=0)
 
-            pose = PoseStamped()
-            pose.pose.position.x = centroid[0]
-            pose.pose.position.y = centroid[1]
-            pose.pose.position.z = 0.0
-            pose.pose.orientation.w = 1.0  
-            pose.header.frame_id = 'map'
-            pose.header.stamp = self.get_clock().now().to_msg()
+            pose = Pose()
+            pose.position.x = centroid[0]
+            pose.position.y = centroid[1]
+            pose.position.z = 0.0
+            pose.orientation.w = 1.0  
             goal_poses.poses.append(pose)
-
         return goal_poses 
     # ======================== ALGORITHMS ========================
     def extract_frontier_region(self):
@@ -377,12 +319,12 @@ class FastFrontPropagation(Node):
                     front.orientation.w = 1.0
                     self.F.append(front)
         self.goal_poses = self.cluster_frontiers(eps=self.eps, min_samples=self.min_samples)
+        self.goles_pub.publish(self.goal_poses)
         pose_arr = PoseArray()
         pose_arr.header.stamp = self.get_clock().now().to_msg()
         pose_arr.header.frame_id = 'map'
         pose_arr.poses = self.F
         self.clusters.publish(pose_arr)
-        self.go_to_frontiers()
 
 def main(args=None):
     rclpy.init(args=args)
