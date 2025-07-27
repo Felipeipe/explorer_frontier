@@ -1,9 +1,9 @@
 frontier_detection_node:
   ros__parameters:
     # cost assigned to values that are unknown in costmap, might have to tune
-    unknown_cost: 0
+    unknown_cost: 10
     # cost margin, discards all frontier candidates whose cost is greater than this value
-    critical_cost: 40
+    critical_cost: 30
     # parameter that controls how far the seed index is searched, (max radius = k*sqrt(map_width*map_height))
     k: 2.0
     # maximum number of seeds obtained by the get_seed_indices method
