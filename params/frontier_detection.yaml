@@ -8,10 +8,10 @@ frontier_detection_node:
     k: 2.0
     # maximum number of seeds obtained by the get_seed_indices method
     max_seeds: 2 
-    xtra_x: -0.7
-    xtra_y: 0.0
+    xtra_x: -0.4
+    xtra_y: -0.08
     # ======== clustering ========
     # cluster radius
-    eps: 0.2
+    eps: 0.4
     # minimum samples 
-    min_samples: 1
+    min_samples: 3

@@ -5,9 +5,10 @@ from rclpy.node import Node
 from rclpy.action import ActionClient
 from nav_msgs.msg import OccupancyGrid 
 from nav2_msgs.action import NavigateThroughPoses
-from geometry_msgs.msg import PoseArray, PoseWithCovarianceStamped, Pose, PoseStamped
+from geometry_msgs.msg import PoseArray, PoseWithCovarianceStamped, Pose, Quaternion
 from visualization_msgs.msg import MarkerArray, Marker
 from std_msgs.msg import Int32
+from tf_transformations import quaternion_from_euler
 import numpy as np
 from sklearn.cluster import DBSCAN
 
@@ -92,6 +93,7 @@ class FastFrontPropagation(Node):
         self.scan_list = set()
         self.front_queue = []
         self.F = []
+
         self.slam_width = None
         self.slam_height = None
         self.slam_resolution = None
@@ -102,6 +104,8 @@ class FastFrontPropagation(Node):
         self.cm_resolution = None
         self.cm_info = None
         self.remaining_poses = None
+        self.first_run = True
+
 
     # ======================== CALLBACKS ========================
     def map_callback(self, msg:OccupancyGrid):
@@ -274,13 +278,18 @@ class FastFrontPropagation(Node):
             pose.position.z = 0.0
             pose.orientation.w = 1.0  
             goal_poses.poses.append(pose)
+        if self.first_run:
+            self.first_run = False
+            goal_poses.poses.append(self.add_extra_pose())
         return goal_poses 
-    def extra_pose(self):
+    def add_extra_pose(self):
 
         front = Pose()
         front.position.x, front.position.y = self.xtra_x, self.xtra_y
         front.position.z = 0.0
-        front.orientation.w = 1.0
+        q = Quaternion()
+        q.x, q.y, q.z, q.w = quaternion_from_euler(0,0,np.pi)
+        front.orientation = q
         return front
     # ======================== ALGORITHMS ========================
     def extract_frontier_region(self):
@@ -339,7 +348,7 @@ class FastFrontPropagation(Node):
                     front.orientation.y = 0.0
                     front.orientation.z = 0.0
                     front.orientation.w = 1.0
-                    self.F.append(front)
+                    self.F.append(front) 
         self.goal_poses = self.cluster_frontiers(eps=self.eps, min_samples=self.min_samples)
         self.goles_pub.publish(self.goal_poses)
         pose_arr = PoseArray()

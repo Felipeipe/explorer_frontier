@@ -34,6 +34,7 @@ class Navigator(Node):
         self.nav_client = ActionClient(self, NavigateThroughPoses, 'navigate_through_poses')
         self.get_logger().info("Navigator node ready, waiting for frontier poses...")
 
+
     def robot_pose_callback(self, msg:PoseWithCovarianceStamped):
         self.robot_pose = msg.pose.pose.position.x, msg.pose.pose.position.y
         
