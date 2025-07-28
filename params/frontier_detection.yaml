@@ -29,4 +29,11 @@ single_pose_navigator_node:
     # Amount of seconds that the robot waits before calling
     # spin recovery (if the robot isn't moving)
     spin_wait_time: 5.0
+    spin_angle: 1.5708
+    time_allowance: 10.0
+    min_vel: 0.01
 
+navigator_node:
+  ros__parameters:
+    # discards goal poses in function of their similarity 
+    similarity_tolerance: 0.005

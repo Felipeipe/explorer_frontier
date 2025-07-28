@@ -2,7 +2,7 @@
 import rclpy
 from rclpy.node import Node
 from rclpy.action import ActionClient
-from geometry_msgs.msg import PoseArray, PoseStamped, PoseWithCovarianceStamped
+from geometry_msgs.msg import PoseArray, PoseStamped, PoseWithCovarianceStamped, Twist
 from nav2_msgs.action import NavigateToPose, Spin
 from std_msgs.msg import Int32
 import numpy as np
@@ -24,6 +24,12 @@ class Navigator(Node):
             self.robot_pose_callback,
             10
         )
+        self.cmd_vel_sub = self.create_subscription(
+            Twist,
+            '/cmd_vel',
+            self.cmd_vel_callback,
+            10 
+        )
         self.poses_remaining = self.create_publisher(
             Int32,
             '/poses_remaining',
@@ -31,10 +37,19 @@ class Navigator(Node):
         )
         self.declare_parameter('similarity_tolerance', 0.005)
         self.declare_parameter('spin_wait_time', 5.0)
+        self.declare_parameter('spin_angle', 1.5708)
+        self.declare_parameter('time_allowance', 10.0)
+        self.declare_parameter('min_vel', 0.01)
+
         self.tolerance = self.get_parameter('similarity_tolerance').value
         self.spin_wait_time = self.get_parameter('spin_wait_time').value
+        self.spin_angle = self.get_parameter('spin_angle').value
+        self.time_allowance = self.get_parameter('time_allowance').value
+        self.min_vel = self.get_parameter('min_vel').value
 
         self.robot_pose = None
+        self.robot_vel = None 
+        self.vel = None
         self.goal_poses = []  
         self.current_index = 0
         self.nav_client = ActionClient(self, NavigateToPose, 'navigate_to_pose')
@@ -43,10 +58,33 @@ class Navigator(Node):
         self.last_goal_poses = []
         self.get_logger().info("Navigator node ready, waiting for frontier poses...")
 
+        self.last_movement_time = self.get_clock().now()
+        self.recovery_timeout_sec = 3.0  # segundos detenido antes de intentar recovery
+
+        self.timer = self.create_timer(0.5, self.check_movement_timeout)  # se ejecuta cada 0.5s
+
     def robot_pose_callback(self, msg: PoseWithCovarianceStamped):
         self.robot_pose = msg.pose.pose.position.x, msg.pose.pose.position.y
+    def cmd_vel_callback(self, msg:Twist):
+        self.vel = msg.linear.x
 
-    def send_spin_goal(self, radians=6.28, time_allowance_sec=10.0):
+    def check_movement_timeout(self):
+        if not self.navigating or self.vel is None:
+            return
+
+        current_time = self.get_clock().now()
+
+        if abs(self.vel) > self.min_vel:
+            # Si se está moviendo, actualizar el tiempo de último movimiento
+            self.last_movement_time = current_time
+        else:
+            elapsed = (current_time - self.last_movement_time).nanoseconds / 1e9
+            if elapsed > self.recovery_timeout_sec:
+                self.get_logger().warn(f"Robot stopped for {elapsed:.1f} sec, executing spin recovery...")
+                self.send_spin_goal(self.spin_angle, self.time_allowance)
+                self.last_movement_time = current_time
+
+    def send_spin_goal(self, radians, time_allowance_sec):
         if not self.spin_client.wait_for_server(timeout_sec=3.0):
             self.get_logger().warn("Spin action server not available.")
             return
@@ -75,6 +113,9 @@ class Navigator(Node):
 
 
     def poses_callback(self, msg: PoseArray):
+        if not self.nav_client.wait_for_server(timeout_sec=5.0):
+            self.get_logger().warn("Action server not available after waiting")
+            return
         if self.robot_pose is None:
             self.get_logger().warn("Robot pose not received yet. Setting it to zero")
             self.robot_pose = (0.0, 0.0)
@@ -98,12 +139,8 @@ class Navigator(Node):
 
         self.last_goal_poses = self.goal_poses
         self.current_index = 0
-        if not self.nav_client.wait_for_server(timeout_sec=5.0):
-            self.get_logger().warn("Action server not available after waiting")
-            return
 
         self.navigate_to_next()
-
     def same_poses(self, poses1, poses2):
         if len(poses1) != len(poses2):
             return False
@@ -139,6 +176,8 @@ class Navigator(Node):
 
     def feedback_callback(self, feedback_msg):
         self.distance_remaining = feedback_msg.feedback.distance_remaining
+        if self.vel is not None and abs(self.vel) < self.min_vel:
+            self.send_spin_goal(self.spin_angle, self.time_allowance)
         if self.distance_remaining < 0.4 and self.navigating:
             self.navigating = False
             self.get_logger().info(f"Goal {self.current_index+1} completed successfully.")
