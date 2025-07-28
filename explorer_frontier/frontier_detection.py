@@ -3,9 +3,10 @@
 import rclpy
 from rclpy.node import Node
 from rclpy.action import ActionClient
+from action_msgs.msg import GoalStatus
 from nav_msgs.msg import OccupancyGrid 
 from nav2_msgs.action import NavigateThroughPoses
-from geometry_msgs.msg import PoseArray, PoseWithCovarianceStamped, Pose, Quaternion
+from geometry_msgs.msg import PoseArray, PoseWithCovarianceStamped, Pose, PoseStamped
 from visualization_msgs.msg import MarkerArray, Marker
 from std_msgs.msg import Int32
 from tf_transformations import quaternion_from_euler
@@ -19,7 +20,6 @@ class FastFrontPropagation(Node):
         super().__init__('frontier_extractor_node')
         # ===============   SERVICES  ==================== 
         self.nav_client = ActionClient(self, NavigateThroughPoses, 'navigate_through_poses')
-
         if not self.nav_client.wait_for_server(timeout_sec=5.0):
             self.get_logger().warn("Action server not available after waiting")
         # =============== SUBSCRIBERS ====================
@@ -40,28 +40,22 @@ class FastFrontPropagation(Node):
             self.costmap_callback,
             10
         )
-        self.remaining_poses_sub = self.create_subscription(
-            Int32,
-            '/poses_remaining',
-            self.remaining_poses_callback,
-            10     
-        )
 
         # =============== PUBLISHERS ====================
         
         self.goles_pub = self.create_publisher(
-            PoseArray,
-            '/frontier_region_list',
+            PoseStamped,
+            '/frontier/goal',
             10
         )
         self.clusters = self.create_publisher(
             PoseArray,
-            '/frontiers',
+            '/frontier/frontiers',
             10
         )
         self.seed_idx_pub = self.create_publisher(
             MarkerArray,
-            '/seed_indices',
+            '/frontier/seed_indices',
             10
         )
         # Parameters, see params/frontier_detection.yaml
@@ -103,7 +97,6 @@ class FastFrontPropagation(Node):
         self.cm_width = None
         self.cm_resolution = None
         self.cm_info = None
-        self.remaining_poses = None
         self.first_run = True
 
 
@@ -114,8 +107,7 @@ class FastFrontPropagation(Node):
         self.slam_height = msg.info.height
         self.slam_resolution = msg.info.resolution
         self.map_info = msg.info 
-        if self.remaining_poses is None or self.remaining_poses <= 1:
-            self.extract_frontier_region()
+        self.extract_frontier_region()
 
     def pose_callback(self, msg:PoseWithCovarianceStamped):
         self.robot_pose = msg.pose.pose 
@@ -127,8 +119,6 @@ class FastFrontPropagation(Node):
         self.cm_resolution = msg.info.resolution
         self.cm_info = msg.info
 
-    def remaining_poses_callback(self, msg:Int32):
-        self.remaining_poses = msg.data
 
     # ======================== UTILITIES ========================
     def seed_to_marker(self, q):
@@ -222,6 +212,26 @@ class FastFrontPropagation(Node):
         return seeds
 
 
+    def nearest(self, poses: list[PoseStamped]):
+
+        if self.robot_pose is None:
+            self.get_logger().warn("Robot pose not received yet. Setting it to zero")
+            rx, ry = (0.0, 0.0)
+        else:
+            rx, ry = self.robot_pose.position.x, self.robot_pose.position.y
+
+        if not poses:
+            self.get_logger().warn("Received empty PoseArray.")
+            return
+
+        distances = np.array([
+            np.linalg.norm([pose.pose.position.x - rx, pose.pose.position.y - ry])
+            for pose in poses
+        ])
+        return poses[np.argmin(distances)]
+
+    
+
 
     def addr(self, x, y, width = None):
         if width == None:
@@ -250,12 +260,9 @@ class FastFrontPropagation(Node):
                         neighbors.append(self.addr(j, i, width))
         return neighbors
 
-    def cluster_frontiers(self, eps=0.5, min_samples=3):
+    def cluster_frontiers(self, eps=0.5, min_samples=3) -> list[PoseStamped]:
         if not self.F:
-            pose_arr = PoseArray()
-            pose_arr.header.stamp = self.get_clock().now().to_msg()
-            pose_arr.header.frame_id = 'map'
-            return pose_arr
+            return []
         points = np.array([[p.position.x, p.position.y] for p in self.F])
 
         clustering = DBSCAN(eps=eps, min_samples=min_samples).fit(points)
@@ -263,49 +270,42 @@ class FastFrontPropagation(Node):
 
         unique_labels = set(labels) - {-1}
 
-        goal_poses = PoseArray()
-        goal_poses.header.stamp = self.get_clock().now().to_msg()
-        goal_poses.header.frame_id = 'map'
-        if self.robot_pose is None:
-            robot_x, robot_y = (0.0, 0.0)
-        else:
-            robot_x, robot_y = self.robot_pose.position.x, self.robot_pose.position.y 
+        goal_poses = []
 
-        for label in unique_labels:
-            cluster_points = points[labels == label]
-
-            dists = np.linalg.norm(cluster_points - np.array([robot_x, robot_y]), axis=1)
-            closest_point = cluster_points[np.argmin(dists)]
-
-            pose = Pose()
-            pose.position.x = closest_point[0]
-            pose.position.y = closest_point[1]
-            pose.position.z = 0.0
-            pose.orientation.w = 1.0
-            goal_poses.poses.append(pose)
-        return goal_poses
+        # if self.robot_pose is None:
+            # robot_x, robot_y = (0.0, 0.0)
+        # else:
+            # robot_x, robot_y = self.robot_pose.position.x, self.robot_pose.position.y 
 
         # for label in unique_labels:
             # cluster_points = points[labels == label]
-            # centroid = np.median(cluster_points, axis=0)
+# 
+            # dists = np.linalg.norm(cluster_points - np.array([robot_x, robot_y]), axis=1)
+            # closest_point = cluster_points[np.argmin(dists)]
+# 
 # 
             # pose = Pose()
-            # pose.position.x = centroid[0]
-            # pose.position.y = centroid[1]
+            # pose.position.x = closest_point[0]
+            # pose.position.y = closest_point[1]
             # pose.position.z = 0.0
-            # pose.orientation.w = 1.0  
+            # pose.orientation.w = 1.0
             # goal_poses.poses.append(pose)
-        # return goal_poses 
+        # return goal_poses
 
-    def add_extra_pose(self):
+        for label in unique_labels:
+            cluster_points = points[labels == label]
+            centroid = np.median(cluster_points, axis=0)
 
-        front = Pose()
-        front.position.x, front.position.y = self.xtra_x, self.xtra_y
-        front.position.z = 0.0
-        q = Quaternion()
-        q.x, q.y, q.z, q.w = quaternion_from_euler(0,0,np.pi)
-        front.orientation = q
-        return front
+            pose = PoseStamped()
+            pose.header.stamp = self.get_clock().now().to_msg()
+            pose.header.frame_id = 'map'
+            pose.pose.position.x = centroid[0]
+            pose.pose.position.y = centroid[1]
+            pose.pose.position.z = 0.0
+            pose.pose.orientation.w = 1.0  
+            goal_poses.append(pose)
+        return goal_poses 
+
     # ======================== ALGORITHMS ========================
     def extract_frontier_region(self):
 
@@ -336,8 +336,6 @@ class FastFrontPropagation(Node):
             self.lattice_vector[s] = 1
 
         while self.front_queue:
-            # ma = self.list_to_marker_array(self.front_queue)
-            # self.seed_idx_pub.publish(ma)
             q = self.front_queue.pop()
 
             self.lattice_vector[q] = 1
@@ -365,8 +363,14 @@ class FastFrontPropagation(Node):
                     front.orientation.z = 0.0
                     front.orientation.w = 1.0
                     self.F.append(front) 
-        self.goal_poses = self.cluster_frontiers(eps=self.eps, min_samples=self.min_samples)
-        self.goles_pub.publish(self.goal_poses)
+
+        clusters = self.cluster_frontiers(eps=self.eps, min_samples=self.min_samples)
+        if not clusters:
+            self.get_logger().warn("No frontier clusters found.")
+            return
+        self.goal_pose = self.nearest(clusters)
+
+        self.goles_pub.publish(self.goal_pose)
         pose_arr = PoseArray()
         pose_arr.header.stamp = self.get_clock().now().to_msg()
         pose_arr.header.frame_id = 'map'
