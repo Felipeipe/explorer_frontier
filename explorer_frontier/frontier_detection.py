@@ -72,9 +72,8 @@ class FastFrontPropagation(Node):
         self.declare_parameter('min_samples',                1)
         self.declare_parameter('max_seeds',                  1)
         self.declare_parameter('number_of_map_updates',      5)
-        self.declare_parameter('xtra_x',                  -0.7)
-        self.declare_parameter('xtra_y',                   0.0)
         self.declare_parameter('set_frontier_permanence', True)
+        self.declare_parameter('cost_window',                3)
 
         self.unknown_cost            = self.get_parameter('unknown_cost').value
         self.critical_cost           = self.get_parameter('critical_cost').value
@@ -83,9 +82,8 @@ class FastFrontPropagation(Node):
         self.min_samples             = self.get_parameter('min_samples').value
         self.max_seeds               = self.get_parameter('max_seeds').value
         self.map_updates             = self.get_parameter('number_of_map_updates').value
-        self.xtra_x                  = self.get_parameter('xtra_x').value
-        self.xtra_y                  = self.get_parameter('xtra_y').value
         self.set_frontier_permanence = self.get_parameter('set_frontier_permanence').value
+        self.cost_window             = self.get_parameter('cost_window').value
 
         # Auxiliary variables
         self.marker_array = MarkerArray()
@@ -181,7 +179,7 @@ class FastFrontPropagation(Node):
         wx, wy = self.map_to_world(q, self.slam_resolution, self.map_info.origin)
         mcx, mcy = self.world_to_map(wx, wy, self.cm_resolution, self.cm_info.origin) 
         qcm = self.addr(mcx, mcy, self.cm_width)
-        neig = self.get_neighbors(qcm, self.cm_width, self.cm_height)
+        neig = self.get_neighbors(qcm, self.cm_width, self.cm_height, self.cost_window)
         cost = 0
         n = len(neig)
         for idx in neig:
@@ -237,21 +235,20 @@ class FastFrontPropagation(Node):
         row = q // width
         return row, col
 
-    def get_neighbors(self, q, width = None, height = None):
-        if width == None:
+    def get_neighbors(self, q, width=None, height=None, radius=1):
+        if width is None:
             width = self.slam_width
-        if height == None:
+        if height is None:
             height = self.slam_height
 
         neighbors = []
         row, col = self.rowcol(q, width)
-        for i in range(row - 1, row + 2):      
-            for j in range(col - 1, col + 2): 
+        for i in range(row - radius, row + radius + 1):      
+            for j in range(col - radius, col + radius + 1): 
                 if 0 <= i < height and 0 <= j < width:
                     if (i, j) != (row, col):
-                        neighbors.append(self.addr(j, i))
+                        neighbors.append(self.addr(j, i, width))
         return neighbors
-
 
     def cluster_frontiers(self, eps=0.5, min_samples=3):
         if not self.F:
@@ -269,21 +266,37 @@ class FastFrontPropagation(Node):
         goal_poses = PoseArray()
         goal_poses.header.stamp = self.get_clock().now().to_msg()
         goal_poses.header.frame_id = 'map'
+        if self.robot_pose is None:
+            robot_x, robot_y = (0.0, 0.0)
+        else:
+            robot_x, robot_y = self.robot_pose.position.x, self.robot_pose.position.y 
 
         for label in unique_labels:
             cluster_points = points[labels == label]
-            centroid = np.mean(cluster_points, axis=0)
+
+            dists = np.linalg.norm(cluster_points - np.array([robot_x, robot_y]), axis=1)
+            closest_point = cluster_points[np.argmin(dists)]
 
             pose = Pose()
-            pose.position.x = centroid[0]
-            pose.position.y = centroid[1]
+            pose.position.x = closest_point[0]
+            pose.position.y = closest_point[1]
             pose.position.z = 0.0
-            pose.orientation.w = 1.0  
+            pose.orientation.w = 1.0
             goal_poses.poses.append(pose)
-        if self.first_run:
-            self.first_run = False
-            goal_poses.poses.append(self.add_extra_pose())
-        return goal_poses 
+        return goal_poses
+
+        # for label in unique_labels:
+            # cluster_points = points[labels == label]
+            # centroid = np.median(cluster_points, axis=0)
+# 
+            # pose = Pose()
+            # pose.position.x = centroid[0]
+            # pose.position.y = centroid[1]
+            # pose.position.z = 0.0
+            # pose.orientation.w = 1.0  
+            # goal_poses.poses.append(pose)
+        # return goal_poses 
+
     def add_extra_pose(self):
 
         front = Pose()

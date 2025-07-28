@@ -41,47 +41,6 @@ class Navigator(Node):
     def robot_pose_callback(self, msg:PoseWithCovarianceStamped):
         self.robot_pose = msg.pose.pose.position.x, msg.pose.pose.position.y
         
-    # def poses_callback(self, msg: PoseArray):
-        # if not self.nav_client.wait_for_server(timeout_sec=5.0):
-            # self.get_logger().warn("Action server not available after waiting ")
-            # return
-# 
-        # if self.robot_pose is None:
-            # self.get_logger().warn("Robot pose not received yet. Setting it to zero")
-            # self.robot_pose = (0.0, 0.0)
-           #  
-        # N = len(msg.poses)
-        # if N == 0:
-            # self.get_logger().warn("Received empty PoseArray.")
-            # return
-# 
-        # rx, ry = self.robot_pose
-# 
-        # distances = np.array([
-            # np.linalg.norm([pose.position.x - rx, pose.position.y - ry])
-            # for pose in msg.poses
-        # ])
-# 
-        # sorted_indices = np.argsort(distances)
-# 
-        # sorted_poses = [msg.poses[i] for i in sorted_indices]
-# 
-        # if self.same_poses(self.goal_poses, self.last_goal_poses):
-            # self.get_logger().info("Received same poses as last time. Skipping...")
-            # return
-        # self.last_goal_poses = sorted_poses
-# 
-        # goal_msg = NavigateThroughPoses.Goal()
-        # for pose in sorted_poses:
-            # stamped = PoseStamped()
-            # stamped.header.stamp = self.get_clock().now().to_msg()
-            # stamped.header.frame_id = "map"
-            # stamped.pose = pose
-            # goal_msg.poses.append(stamped)
-# 
-        # self.get_logger().info(f"Sending {len(goal_msg.poses)} poses to NavigateThroughPoses...")
-        # future = self.nav_client.send_goal_async(goal_msg, feedback_callback=self.feedback_callback)
-        # future.add_done_callback(self.goal_response_callback)
     def poses_callback(self, msg: PoseArray):
         if not self.nav_client.wait_for_server(timeout_sec=5.0):
             self.get_logger().warn("Action server not available after waiting ")
@@ -108,7 +67,7 @@ class Navigator(Node):
             return
 
         self.last_goal_poses = sorted_poses
-        self.goal_poses = sorted_poses  # <- asegúrate de mantenerla actualizada
+        self.goal_poses = sorted_poses  
 
         goal_msg = NavigateThroughPoses.Goal()
         for pose in sorted_poses:
@@ -145,7 +104,6 @@ class Navigator(Node):
     def feedback_callback(self, feedback_msg):
         poses_remaining = Int32()
         poses_remaining.data = feedback_msg.feedback.number_of_poses_remaining
-        # self.poses_remaining.publish(poses_remaining)
 
     def result_callback(self, future):
         result = future.result().result

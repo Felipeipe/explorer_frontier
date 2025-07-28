@@ -2,20 +2,21 @@ frontier_detection_node:
   ros__parameters:
     # cost assigned to values that are unknown in costmap, might have to tune
     unknown_cost: 10
+
     # cost margin, discards all frontier candidates whose cost is greater than this value
     critical_cost: 30
+
     # parameter that controls how far the seed index is searched, (max radius = k*sqrt(map_width*map_height))
     k: 2.0
+
     # maximum number of seeds obtained by the get_seed_indices method
     max_seeds: 2 
-    # extra pose in order to avoid the robot being stalled at the initialization
-    # of the script
-    xtra_x: -0.4
-    xtra_y: -0.08
+
     # store frontier points found in previous iterations.
     # Those frontier points are discarded when the map info is updated
     # in those regions
     set_frontier_permanence: true
+
     # ======== clustering ========
     # cluster radius
     eps: 0.4
@@ -24,8 +25,10 @@ frontier_detection_node:
  
 single_pose_navigator_node:
   ros__parameters:
+    
     # discards goal poses in function of their similarity 
     similarity_tolerance: 0.005
+
     # Amount of seconds that the robot waits before calling
     # spin recovery (if the robot isn't moving)
     spin_wait_time: 5.0
