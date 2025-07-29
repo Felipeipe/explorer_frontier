@@ -65,12 +65,14 @@ class Navigator(Node):
         pass
 
     def result_callback(self, future: Future):
-        result = future.result().result
-        if result.status != GoalStatus.STATUS_SUCCEEDED:
-            self.get_logger().warn(f"Navigation failed with status: {result.status}")
+        result_future = future.result()
+        result = result_future.result
+        status = result_future.status
+
+        if status != GoalStatus.STATUS_SUCCEEDED:
+            self.get_logger().warn(f"Navigation failed with status: {status}")
         else:
             self.get_logger().info("Navigation succeeded.")
-
 
 def main(args=None):
     rclpy.init(args=args)
