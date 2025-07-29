@@ -65,7 +65,6 @@ class FastFrontPropagation(Node):
         self.declare_parameter('eps',                      0.5)
         self.declare_parameter('min_samples',                1)
         self.declare_parameter('max_seeds',                  1)
-        self.declare_parameter('number_of_map_updates',      5)
         self.declare_parameter('set_frontier_permanence', True)
         self.declare_parameter('cost_window',                3)
 
@@ -75,7 +74,6 @@ class FastFrontPropagation(Node):
         self.eps                     = self.get_parameter('eps').value
         self.min_samples             = self.get_parameter('min_samples').value
         self.max_seeds               = self.get_parameter('max_seeds').value
-        self.map_updates             = self.get_parameter('number_of_map_updates').value
         self.set_frontier_permanence = self.get_parameter('set_frontier_permanence').value
         self.cost_window             = self.get_parameter('cost_window').value
 
