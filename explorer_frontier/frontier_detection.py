@@ -100,11 +100,23 @@ class FastFrontPropagation(Node):
 
     # ======================== CALLBACKS ========================
     def map_callback(self, msg:OccupancyGrid):
-        self.slam_map = msg.data
-        self.slam_width = msg.info.width
-        self.slam_height = msg.info.height
+        padded_data, new_width, new_height = self.pad_map_with_unknown(
+            msg.data,
+            msg.info.width,
+            msg.info.height
+        )
+
+        self.slam_map = padded_data
+        self.slam_width = new_width
+        self.slam_height = new_height
         self.slam_resolution = msg.info.resolution
-        self.map_info = msg.info 
+
+        self.map_info = msg.info
+        self.map_info.width = new_width
+        self.map_info.height = new_height
+        self.map_info.origin.position.x -= self.slam_resolution
+        self.map_info.origin.position.y -= self.slam_resolution
+
         self.extract_frontier_region()
 
     def pose_callback(self, msg:PoseWithCovarianceStamped):
@@ -119,6 +131,18 @@ class FastFrontPropagation(Node):
 
 
     # ======================== UTILITIES ========================
+    def pad_map_with_unknown(self, map_data, width, height, pad_value=-1):
+        new_width = width + 2
+        new_height = height + 2
+
+        padded_map = np.full((new_height, new_width), pad_value, dtype=np.int8)
+
+        original_map = np.array(map_data, dtype=np.int8).reshape((height, width))
+
+        padded_map[1:height+1, 1:width+1] = original_map
+
+        return padded_map.flatten().tolist(), new_width, new_height
+
     def seed_to_marker(self, q):
         wx, wy = self.map_to_world(q, self.slam_resolution, self.map_info.origin)
 
@@ -349,10 +373,10 @@ class FastFrontPropagation(Node):
 
     def extract_frontiers(self):
         for p in self.scan_list:
-            neighbors = self.get_neighbors(p)
+            neighbors = self.get_neighbors(p, None, None, radius=2)
             cost = self.get_cost(p)
             if cost < self.critical_cost: 
-                if all(self.slam_map[idx] != 100 for idx in neighbors):
+                if all(self.slam_map[idx] < 90 for idx in neighbors):
                     front = Pose()
                     front.position.x, front.position.y = self.map_to_world(p, self.slam_resolution, self.map_info.origin)
                     front.position.z = 0.0
