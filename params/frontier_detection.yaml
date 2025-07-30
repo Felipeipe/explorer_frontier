@@ -4,8 +4,11 @@ frontier_detection_node:
     unknown_cost: 0
 
     # cost margin, discards all frontier candidates whose cost is greater than this value
-    critical_cost: 10
+    critical_cost: 5
 
+    # discards all cells who's probability on being on the frontier
+    # is lower than this value
+    min_probability: 0.9
     # number of neighbors checked on the costmap
     cost_window: 3
 
@@ -18,7 +21,7 @@ frontier_detection_node:
     # store frontier points found in previous iterations.
     # Those frontier points are discarded when the map info is updated
     # in those regions
-    set_frontier_permanence: true
+    set_frontier_permanence: false
 
     # ======== clustering ========
     # cluster radius
