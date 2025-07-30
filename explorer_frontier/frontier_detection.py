@@ -23,11 +23,6 @@ class FastFrontPropagation(Node):
         if not self.nav_client.wait_for_server(timeout_sec=5.0):
             self.get_logger().warn("Action server not available after waiting")
         # =============== SUBSCRIBERS ====================
-        self.map_sub = self.create_subscription(
-            OccupancyGrid,
-            'map',
-            self.map_callback,
-            10)
         self.pose_sub = self.create_subscription(
             PoseWithCovarianceStamped,
             'pose',
@@ -40,13 +35,18 @@ class FastFrontPropagation(Node):
             self.costmap_callback,
             10
         )
-
         self.goal_status_sub = self.create_subscription(
             Int8,
             '/frontier/goal_status',
             self.goal_status_callback,
             10
         )
+        self.map_sub = self.create_subscription(
+            OccupancyGrid,
+            'map',
+            self.map_callback,
+            10)
+
         # =============== PUBLISHERS ====================
         
         self.goles_pub = self.create_publisher(
@@ -105,6 +105,19 @@ class FastFrontPropagation(Node):
         self.goal_status = None
 
     # ======================== CALLBACKS ========================
+    def pose_callback(self, msg:PoseWithCovarianceStamped):
+        self.robot_pose = msg.pose.pose 
+
+    def costmap_callback(self, msg: OccupancyGrid):
+        self.costmap = msg.data
+        self.cm_width = msg.info.width
+        self.cm_height = msg.info.height
+        self.cm_resolution = msg.info.resolution
+        self.cm_info = msg.info
+
+    def goal_status_callback(self, msg:Int8):
+        self.goal_status = msg.data
+
     def map_callback(self, msg:OccupancyGrid):
         padded_data, new_width, new_height = self.pad_map_with_unknown(
             msg.data,
@@ -125,18 +138,6 @@ class FastFrontPropagation(Node):
 
         self.extract_frontier_region()
 
-    def pose_callback(self, msg:PoseWithCovarianceStamped):
-        self.robot_pose = msg.pose.pose 
-
-    def costmap_callback(self, msg: OccupancyGrid):
-        self.costmap = msg.data
-        self.cm_width = msg.info.width
-        self.cm_height = msg.info.height
-        self.cm_resolution = msg.info.resolution
-        self.cm_info = msg.info
-
-    def goal_status_callback(self, msg:Int8):
-        self.goal_status = msg.data
     # ======================== UTILITIES ========================
     def pad_map_with_unknown(self, map_data, width, height, pad_value=-1):
         new_width = width + 2
@@ -192,7 +193,6 @@ class FastFrontPropagation(Node):
         Calculates average obstacle cost in a small patch @ index q
         """
         if self.cm_info is None or self.costmap is None:
-            self.get_logger().warn("Costmap not received yet, skipping cost calculation.")
             return float('inf')
             
         wx, wy = self.map_to_world(q, self.slam_resolution, self.map_info.origin)
@@ -212,40 +212,39 @@ class FastFrontPropagation(Node):
         return cost
 
     def get_seed_indices(self, max_seeds=None):
-        # if max_seeds == None:
-            # max_seeds = self.max_seeds
-        # if self.robot_pose is None:
-            # x, y = 0.0, 0.0
-        # else:
-            # x = self.robot_pose.position.x
-            # y = self.robot_pose.position.y
-# 
-        # mx, my = self.world_to_map(x, y, self.slam_resolution, self.map_info.origin)
-        # max_radius = int(self.k * np.sqrt(self.slam_height * self.slam_width))
-# 
-        # seeds = []
-        # for r in range(max_radius):
-            # for dx in range(-r, r + 1):
-                # for dy in range(-r, r + 1):
-                    # nx, ny = mx + dx, my + dy
-                    # if 0 <= nx < self.slam_width and 0 <= ny < self.slam_height:
-                        # idx = self.addr(nx, ny)
-                        # if self.slam_map[idx] == -1 and self.lattice_vector[idx] == -1:
-                            # seeds.append(idx)
-                            # self.marker_array.markers.append(self.seed_to_marker(idx))
-                            # if len(seeds) >= max_seeds:
-                                # self.seed_idx_pub.publish(self.marker_array)
-                                # return seeds
-# 
-        # self.seed_idx_pub.publish(self.marker_array)
-        seeds = [0]
+        if max_seeds == None:
+            max_seeds = self.max_seeds
+        if self.robot_pose is None:
+            x, y = 0.0, 0.0
+        else:
+            x = self.robot_pose.position.x
+            y = self.robot_pose.position.y
+
+        mx, my = self.world_to_map(x, y, self.slam_resolution, self.map_info.origin)
+        max_radius = int(self.k * np.sqrt(self.slam_height * self.slam_width))
+
+        seeds = []
+        for r in range(max_radius):
+            for dx in range(-r, r + 1):
+                for dy in range(-r, r + 1):
+                    nx, ny = mx + dx, my + dy
+                    if 0 <= nx < self.slam_width and 0 <= ny < self.slam_height:
+                        idx = self.addr(nx, ny)
+                        if self.slam_map[idx] == -1 and self.lattice_vector[idx] == -1:
+                            seeds.append(idx)
+                            self.marker_array.markers.append(self.seed_to_marker(idx))
+                            if len(seeds) >= max_seeds:
+                                self.seed_idx_pub.publish(self.marker_array)
+                                return seeds
+
+        self.seed_idx_pub.publish(self.marker_array)
+        # seeds = [0]
         return seeds
 
 
-    def nearest(self, poses: list[PoseStamped]):
+    def nth_nearest(self, poses: list[PoseStamped], n = 0):
 
         if self.robot_pose is None:
-            self.get_logger().warn("Robot pose not received yet. Setting it to zero")
             rx, ry = (0.0, 0.0)
         else:
             rx, ry = self.robot_pose.position.x, self.robot_pose.position.y
@@ -258,7 +257,8 @@ class FastFrontPropagation(Node):
             np.linalg.norm([pose.pose.position.x - rx, pose.pose.position.y - ry])
             for pose in poses
         ])
-        return poses[np.argmin(distances)]
+        sorted_indices = np.sort(distances)
+        return poses[sorted_indices[n]]
 
     
 
@@ -301,26 +301,6 @@ class FastFrontPropagation(Node):
         unique_labels = set(labels) - {-1}
 
         goal_poses = []
-
-        # if self.robot_pose is None:
-            # robot_x, robot_y = (0.0, 0.0)
-        # else:
-            # robot_x, robot_y = self.robot_pose.position.x, self.robot_pose.position.y 
-
-        # for label in unique_labels:
-            # cluster_points = points[labels == label]
-# 
-            # dists = np.linalg.norm(cluster_points - np.array([robot_x, robot_y]), axis=1)
-            # closest_point = cluster_points[np.argmin(dists)]
-# 
-# 
-            # pose = Pose()
-            # pose.position.x = closest_point[0]
-            # pose.position.y = closest_point[1]
-            # pose.position.z = 0.0
-            # pose.orientation.w = 1.0
-            # goal_poses.poses.append(pose)
-        # return goal_poses
 
         for label in unique_labels:
             cluster_points = points[labels == label]
@@ -398,7 +378,10 @@ class FastFrontPropagation(Node):
         if not clusters:
             self.get_logger().warn("No frontier clusters found.")
             return
-        self.goal_pose = self.nearest(clusters)
+        i = 0
+        if self.goal_status == 0 and i < len(clusters) - 1:
+            i += 1
+        self.goal_pose = self.nth_nearest(clusters, i)
 
         self.goles_pub.publish(self.goal_pose)
         pose_arr = PoseArray()
