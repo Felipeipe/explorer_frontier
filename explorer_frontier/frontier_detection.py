@@ -214,33 +214,33 @@ class FastFrontPropagation(Node):
         return cost
 
     def get_seed_indices(self, max_seeds=None):
-        # if max_seeds == None:
-            # max_seeds = self.max_seeds
-        # if self.robot_pose is None:
-            # x, y = 0.0, 0.0
-        # else:
-            # x = self.robot_pose.position.x
-            # y = self.robot_pose.position.y
-# 
-        # mx, my = self.world_to_map(x, y, self.slam_resolution, self.map_info.origin)
-        # max_radius = int(self.k * np.sqrt(self.slam_height * self.slam_width))
-# 
-        # seeds = []
-        # for r in range(max_radius):
-            # for dx in range(-r, r + 1):
-                # for dy in range(-r, r + 1):
-                    # nx, ny = mx + dx, my + dy
-                    # if 0 <= nx < self.slam_width and 0 <= ny < self.slam_height:
-                        # idx = self.addr(nx, ny)
-                        # if self.slam_map[idx] == -1 and self.lattice_vector[idx] == -1:
-                            # seeds.append(idx)
-                            # self.marker_array.markers.append(self.seed_to_marker(idx))
-                            # if len(seeds) >= max_seeds:
-                                # self.seed_idx_pub.publish(self.marker_array)
-                                # return seeds
-# 
-        # self.seed_idx_pub.publish(self.marker_array)
-        seeds = [0]
+        if max_seeds == None:
+            max_seeds = self.max_seeds
+        if self.robot_pose is None:
+            x, y = 0.0, 0.0
+        else:
+            x = self.robot_pose.position.x
+            y = self.robot_pose.position.y
+
+        mx, my = self.world_to_map(x, y, self.slam_resolution, self.map_info.origin)
+        max_radius = int(self.k * np.sqrt(self.slam_height * self.slam_width))
+
+        seeds = []
+        for r in range(max_radius):
+            for dx in range(-r, r + 1):
+                for dy in range(-r, r + 1):
+                    nx, ny = mx + dx, my + dy
+                    if 0 <= nx < self.slam_width and 0 <= ny < self.slam_height:
+                        idx = self.addr(nx, ny)
+                        if self.slam_map[idx] == -1 and self.lattice_vector[idx] == -1:
+                            seeds.append(idx)
+                            self.marker_array.markers.append(self.seed_to_marker(idx))
+                            if len(seeds) >= max_seeds:
+                                self.seed_idx_pub.publish(self.marker_array)
+                                return seeds
+
+        self.seed_idx_pub.publish(self.marker_array)
+        # seeds = [0]
         return seeds
 
 
