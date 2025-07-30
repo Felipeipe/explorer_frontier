@@ -242,7 +242,7 @@ class FastFrontPropagation(Node):
         return seeds
 
 
-    def nth_nearest(self, poses: list[PoseStamped], n = 0):
+    def nth_nearest(self, poses: list[PoseStamped]):
 
         if self.robot_pose is None:
             rx, ry = (0.0, 0.0)
@@ -257,8 +257,7 @@ class FastFrontPropagation(Node):
             np.linalg.norm([pose.pose.position.x - rx, pose.pose.position.y - ry])
             for pose in poses
         ])
-        sorted_indices = np.argsort(distances)
-        return poses[sorted_indices[n]]
+        return poses[np.argmin(distances)]
 
     
 
@@ -342,8 +341,6 @@ class FastFrontPropagation(Node):
     def march_front(self):
         seed_indices = self.get_seed_indices()
         self.front_queue.extend(seed_indices)
-        for s in seed_indices:
-            self.lattice_vector[s] = 1
 
         while self.front_queue:
             q = self.front_queue.pop()
@@ -378,10 +375,7 @@ class FastFrontPropagation(Node):
         if not clusters:
             self.get_logger().warn("No frontier clusters found.")
             return
-        i = 0
-        if self.goal_status == 0 and i < len(clusters) - 1:
-            i += 1
-        self.goal_pose = self.nth_nearest(clusters, i)
+        self.goal_pose = self.nth_nearest(clusters)
 
         self.goles_pub.publish(self.goal_pose)
         pose_arr = PoseArray()

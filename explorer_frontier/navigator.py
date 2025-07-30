@@ -26,12 +26,6 @@ class Navigator(Node):
             self.robot_pose_callback,
             10
         )
-        # === PUBS ===
-        self.feedback_pub = self.create_publisher(
-            Int8,
-            '/frontier/goal_status',
-            10
-        )
         # === ACTION CLIENT ===
         self.nav_client = ActionClient(self, NavigateToPose, 'navigate_to_pose')
 
@@ -80,7 +74,6 @@ class Navigator(Node):
         else:
             msg.data = 1
 
-        self.feedback_pub.publish(msg)
 def main(args=None):
     rclpy.init(args=args)
     navigator = Navigator()
