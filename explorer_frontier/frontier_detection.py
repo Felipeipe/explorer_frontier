@@ -257,7 +257,7 @@ class FastFrontPropagation(Node):
             np.linalg.norm([pose.pose.position.x - rx, pose.pose.position.y - ry])
             for pose in poses
         ])
-        sorted_indices = np.sort(distances)
+        sorted_indices = np.argsort(distances)
         return poses[sorted_indices[n]]
 
     
