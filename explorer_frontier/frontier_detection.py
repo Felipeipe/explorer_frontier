@@ -73,6 +73,7 @@ class FastFrontPropagation(Node):
         self.declare_parameter('max_seeds',                  1)
         self.declare_parameter('set_frontier_permanence', True)
         self.declare_parameter('cost_window',                3)
+        self.declare_parameter('min_probability',         0.95)
 
         self.unknown_cost            = self.get_parameter('unknown_cost').value
         self.critical_cost           = self.get_parameter('critical_cost').value
@@ -82,6 +83,7 @@ class FastFrontPropagation(Node):
         self.max_seeds               = self.get_parameter('max_seeds').value
         self.set_frontier_permanence = self.get_parameter('set_frontier_permanence').value
         self.cost_window             = self.get_parameter('cost_window').value
+        self.min_probability         = self.get_parameter('min_probability').value
 
         # Auxiliary variables
         self.marker_array = MarkerArray()
@@ -212,33 +214,33 @@ class FastFrontPropagation(Node):
         return cost
 
     def get_seed_indices(self, max_seeds=None):
-        if max_seeds == None:
-            max_seeds = self.max_seeds
-        if self.robot_pose is None:
-            x, y = 0.0, 0.0
-        else:
-            x = self.robot_pose.position.x
-            y = self.robot_pose.position.y
-
-        mx, my = self.world_to_map(x, y, self.slam_resolution, self.map_info.origin)
-        max_radius = int(self.k * np.sqrt(self.slam_height * self.slam_width))
-
-        seeds = []
-        for r in range(max_radius):
-            for dx in range(-r, r + 1):
-                for dy in range(-r, r + 1):
-                    nx, ny = mx + dx, my + dy
-                    if 0 <= nx < self.slam_width and 0 <= ny < self.slam_height:
-                        idx = self.addr(nx, ny)
-                        if self.slam_map[idx] == -1 and self.lattice_vector[idx] == -1:
-                            seeds.append(idx)
-                            self.marker_array.markers.append(self.seed_to_marker(idx))
-                            if len(seeds) >= max_seeds:
-                                self.seed_idx_pub.publish(self.marker_array)
-                                return seeds
-
-        self.seed_idx_pub.publish(self.marker_array)
-        # seeds = [0]
+        # if max_seeds == None:
+            # max_seeds = self.max_seeds
+        # if self.robot_pose is None:
+            # x, y = 0.0, 0.0
+        # else:
+            # x = self.robot_pose.position.x
+            # y = self.robot_pose.position.y
+# 
+        # mx, my = self.world_to_map(x, y, self.slam_resolution, self.map_info.origin)
+        # max_radius = int(self.k * np.sqrt(self.slam_height * self.slam_width))
+# 
+        # seeds = []
+        # for r in range(max_radius):
+            # for dx in range(-r, r + 1):
+                # for dy in range(-r, r + 1):
+                    # nx, ny = mx + dx, my + dy
+                    # if 0 <= nx < self.slam_width and 0 <= ny < self.slam_height:
+                        # idx = self.addr(nx, ny)
+                        # if self.slam_map[idx] == -1 and self.lattice_vector[idx] == -1:
+                            # seeds.append(idx)
+                            # self.marker_array.markers.append(self.seed_to_marker(idx))
+                            # if len(seeds) >= max_seeds:
+                                # self.seed_idx_pub.publish(self.marker_array)
+                                # return seeds
+# 
+        # self.seed_idx_pub.publish(self.marker_array)
+        seeds = [0]
         return seeds
 
 
@@ -314,7 +316,12 @@ class FastFrontPropagation(Node):
             pose.pose.orientation.w = 1.0  
             goal_poses.append(pose)
         return goal_poses 
-
+    def frontier_probability(self, neighbors: list[int])-> float:
+        vals = [self.slam_map[idx] for idx in neighbors]
+        unknown_cells = vals.count(-1)
+        
+        p = 1 - 2 * abs(unknown_cells/len(neighbors) - 1/2)
+        return p
     # ======================== ALGORITHMS ========================
     def extract_frontier_region(self):
 
@@ -349,7 +356,7 @@ class FastFrontPropagation(Node):
             neighbors = self.get_neighbors(q)
             for idx in neighbors:
                 if self.lattice_vector[idx] != 1:
-                    if self.slam_map[idx] == -1:
+                    if self.slam_map[idx] == -1 or self.slam_map[idx] == 100:
                         if self.lattice_vector[idx] == -1:
                             self.front_queue.append(idx)
                             self.lattice_vector[idx] = 0
@@ -358,18 +365,20 @@ class FastFrontPropagation(Node):
 
     def extract_frontiers(self):
         for p in self.scan_list:
-            neighbors = self.get_neighbors(p, None, None, radius=2)
+            neighbors = self.get_neighbors(p, None, None, radius=3)
             cost = self.get_cost(p)
-            if cost < self.critical_cost: 
-                if all(self.slam_map[idx] < 90 for idx in neighbors):
-                    front = Pose()
-                    front.position.x, front.position.y = self.map_to_world(p, self.slam_resolution, self.map_info.origin)
-                    front.position.z = 0.0
-                    front.orientation.x = 0.0
-                    front.orientation.y = 0.0
-                    front.orientation.z = 0.0
-                    front.orientation.w = 1.0
-                    self.F.append(front) 
+            rho = self.frontier_probability(neighbors)
+            if rho > self.min_probability: 
+                if cost < self.critical_cost: 
+                    if all(self.slam_map[idx] < 90 for idx in neighbors):
+                        front = Pose()
+                        front.position.x, front.position.y = self.map_to_world(p, self.slam_resolution, self.map_info.origin)
+                        front.position.z = 0.0
+                        front.orientation.x = 0.0
+                        front.orientation.y = 0.0
+                        front.orientation.z = 0.0
+                        front.orientation.w = 1.0
+                        self.F.append(front) 
 
         clusters = self.cluster_frontiers(eps=self.eps, min_samples=self.min_samples)
         if not clusters:

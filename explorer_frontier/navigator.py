@@ -49,7 +49,7 @@ class Navigator(Node):
     def send_navigation_goal(self, pose_stamped: PoseStamped):
         goal = NavigateToPose.Goal()
         goal.pose = pose_stamped
-
+        self.get_logger().info(f'Recieved pose ({pose_stamped.pose.position.x:.2f}, {pose_stamped.pose.position.y:.2f})')
         send_future = self.nav_client.send_goal_async(goal, feedback_callback=self.feedback_callback)
         send_future.add_done_callback(self.goal_response_callback)
 
