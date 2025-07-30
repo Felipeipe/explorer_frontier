@@ -5,6 +5,7 @@ from rclpy.action import ActionClient
 from rclpy.task import Future
 from geometry_msgs.msg import PoseStamped, PoseWithCovarianceStamped
 from action_msgs.msg import GoalStatus
+from std_msgs.msg import Int8
 from nav2_msgs.action import NavigateToPose
 
 class Navigator(Node):
@@ -25,7 +26,12 @@ class Navigator(Node):
             self.robot_pose_callback,
             10
         )
-
+        # === PUBS ===
+        self.feedback_pub = self.create_publisher(
+            Int8,
+            '/frontier/goal_status',
+            10
+        )
         # === ACTION CLIENT ===
         self.nav_client = ActionClient(self, NavigateToPose, 'navigate_to_pose')
 
@@ -66,14 +72,15 @@ class Navigator(Node):
 
     def result_callback(self, future: Future):
         result_future = future.result()
-        result = result_future.result
         status = result_future.status
-
-        if status != GoalStatus.STATUS_SUCCEEDED:
+        msg = Int8()
+        if status == GoalStatus.STATUS_ABORTED or status == GoalStatus.STATUS_CANCELED or GoalStatus.STATUS_UNKNOWN:
             self.get_logger().warn(f"Navigation failed with status: {status}")
+            msg.data = 0
         else:
-            self.get_logger().info("Navigation succeeded.")
+            msg.data = 1
 
+        self.feedback_pub.publish(msg)
 def main(args=None):
     rclpy.init(args=args)
     navigator = Navigator()

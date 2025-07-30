@@ -4,7 +4,7 @@ frontier_detection_node:
     unknown_cost: 0
 
     # cost margin, discards all frontier candidates whose cost is greater than this value
-    critical_cost: 30
+    critical_cost: 10
 
     # number of neighbors checked on the costmap
     cost_window: 3
