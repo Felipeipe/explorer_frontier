@@ -22,13 +22,6 @@ def generate_launch_description():
         name="navigator_node",
         output="screen"
     )
-    single_pose_navigator = Node(
-        package='explorer_frontier',
-        executable='single_pose_navigator',
-        name='single_pose_navigator_node',
-        output='screen',
-        parameters=[config_path]
-    )
     return LaunchDescription([
         frontier_node,
         navigator_node

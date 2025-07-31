@@ -8,7 +8,7 @@ frontier_detection_node:
 
     # discards all cells who's probability on being on the frontier
     # is lower than this value
-    min_probability: 0.0
+    min_probability: 0.75
     # number of neighbors checked on the costmap
     cost_window: 3
 

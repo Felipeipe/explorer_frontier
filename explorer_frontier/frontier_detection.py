@@ -356,7 +356,7 @@ class FastFrontPropagation(Node):
             neighbors = self.get_neighbors(q)
             for idx in neighbors:
                 if self.lattice_vector[idx] != 1:
-                    if self.slam_map[idx] == -1 or self.slam_map[idx] == 100:
+                    if self.slam_map[idx] == -1:
                         if self.lattice_vector[idx] == -1:
                             self.front_queue.append(idx)
                             self.lattice_vector[idx] = 0
