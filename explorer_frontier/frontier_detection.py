@@ -191,30 +191,30 @@ class FastFrontPropagation(Node):
         return wx, wy
 
     def get_cost(self, q):
-        """
-        Calculates average obstacle cost in a small patch @ index q
-        """
         if self.cm_info is None or self.costmap is None:
             return float('inf')
-            
+
         wx, wy = self.map_to_world(q, self.slam_resolution, self.map_info.origin)
-        mcx, mcy = self.world_to_map(wx, wy, self.cm_resolution, self.cm_info.origin) 
+        mcx, mcy = self.world_to_map(wx, wy, self.cm_resolution, self.cm_info.origin)
         qcm = self.addr(mcx, mcy, self.cm_width)
         neig = self.get_neighbors(qcm, self.cm_width, self.cm_height, self.cost_window)
-        cost = 0
+
         n = len(neig)
+        if n == 0:
+            return float('inf')
+
+        inv_n = 1.0 / n
+        cost = 0.0
         for idx in neig:
             if 0 <= idx < len(self.costmap):
-                if self.costmap[idx] == -1:
-                    cost += self.unknown_cost / n
-                else:
-                    cost += self.costmap[idx] / n
+                value = self.unknown_cost if self.costmap[idx] == -1 else self.costmap[idx]
             else:
-                cost += self.unknown_cost / n 
+                value = self.unknown_cost
+            cost += value * inv_n
         return cost
 
     def get_seed_indices(self, max_seeds=None):
-        if max_seeds == None:
+        if max_seeds is None:
             max_seeds = self.max_seeds
         if self.robot_pose is None:
             x, y = 0.0, 0.0
@@ -226,9 +226,22 @@ class FastFrontPropagation(Node):
         max_radius = int(self.k * np.sqrt(self.slam_height * self.slam_width))
 
         seeds = []
-        for r in range(max_radius):
+        self.marker_array.markers = []
+
+        for r in range(1, max_radius):
             for dx in range(-r, r + 1):
-                for dy in range(-r, r + 1):
+                for dy in [-r, r]:
+                    nx, ny = mx + dx, my + dy
+                    if 0 <= nx < self.slam_width and 0 <= ny < self.slam_height:
+                        idx = self.addr(nx, ny)
+                        if self.slam_map[idx] == -1 and self.lattice_vector[idx] == -1:
+                            seeds.append(idx)
+                            self.marker_array.markers.append(self.seed_to_marker(idx))
+                            if len(seeds) >= max_seeds:
+                                self.seed_idx_pub.publish(self.marker_array)
+                                return seeds
+            for dy in range(-r + 1, r):
+                for dx in [-r, r]:
                     nx, ny = mx + dx, my + dy
                     if 0 <= nx < self.slam_width and 0 <= ny < self.slam_height:
                         idx = self.addr(nx, ny)
@@ -240,9 +253,7 @@ class FastFrontPropagation(Node):
                                 return seeds
 
         self.seed_idx_pub.publish(self.marker_array)
-        # seeds = [0]
         return seeds
-
 
     def nth_nearest(self, poses: list[PoseStamped]):
 
@@ -294,28 +305,28 @@ class FastFrontPropagation(Node):
     def cluster_frontiers(self, eps=0.5, min_samples=3) -> list[PoseStamped]:
         if not self.F:
             return []
-        points = np.array([[p.position.x, p.position.y] for p in self.F])
 
+        now = self.get_clock().now().to_msg()
+        frame_id = 'map'
+
+        points = np.array([[p.position.x, p.position.y] for p in self.F])
         clustering = DBSCAN(eps=eps, min_samples=min_samples).fit(points)
         labels = clustering.labels_
 
-        unique_labels = set(labels) - {-1}
-
         goal_poses = []
-
-        for label in unique_labels:
+        for label in set(labels) - {-1}:
             cluster_points = points[labels == label]
             centroid = np.median(cluster_points, axis=0)
 
             pose = PoseStamped()
-            pose.header.stamp = self.get_clock().now().to_msg()
-            pose.header.frame_id = 'map'
+            pose.header.stamp = now
+            pose.header.frame_id = frame_id
             pose.pose.position.x = centroid[0]
             pose.pose.position.y = centroid[1]
-            pose.pose.position.z = 0.0
-            pose.pose.orientation.w = 1.0  
+            pose.pose.orientation.w = 1.0
             goal_poses.append(pose)
-        return goal_poses 
+        return goal_poses
+
     def frontier_probability(self, neighbors: list[int])-> float:
         vals = [self.slam_map[idx] for idx in neighbors]
         unknown_cells = vals.count(-1)
@@ -365,28 +376,29 @@ class FastFrontPropagation(Node):
 
     def extract_frontiers(self):
         for p in self.scan_list:
-            neighbors = self.get_neighbors(p, None, None, radius=3)
+            neighbors = self.get_neighbors(p, radius=3)
+            if not neighbors:
+                continue
             cost = self.get_cost(p)
             rho = self.frontier_probability(neighbors)
-            if rho > self.min_probability: 
-                if cost < self.critical_cost: 
-                    if all(self.slam_map[idx] < 90 for idx in neighbors):
-                        front = Pose()
-                        front.position.x, front.position.y = self.map_to_world(p, self.slam_resolution, self.map_info.origin)
-                        front.position.z = 0.0
-                        front.orientation.x = 0.0
-                        front.orientation.y = 0.0
-                        front.orientation.z = 0.0
-                        front.orientation.w = 1.0
-                        self.F.append(front) 
+
+            if rho > self.min_probability and cost < self.critical_cost:
+                if all(self.slam_map[idx] < 90 for idx in neighbors):
+                    x, y = self.map_to_world(p, self.slam_resolution, self.map_info.origin)
+                    front = Pose()
+                    front.position.x = x
+                    front.position.y = y
+                    front.orientation.w = 1.0
+                    self.F.append(front)
 
         clusters = self.cluster_frontiers(eps=self.eps, min_samples=self.min_samples)
         if not clusters:
             self.get_logger().warn("No frontier clusters found.")
             return
-        self.goal_pose = self.nth_nearest(clusters)
 
+        self.goal_pose = self.nth_nearest(clusters)
         self.goles_pub.publish(self.goal_pose)
+
         pose_arr = PoseArray()
         pose_arr.header.stamp = self.get_clock().now().to_msg()
         pose_arr.header.frame_id = 'map'
